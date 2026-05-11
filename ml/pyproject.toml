@@ -1,0 +1,25 @@
+[project]
+name = "kpi-helpdesk-ml"
+version = "0.1.0"
+description = "Data collection, LoRA fine-tuning, and evaluation pipeline for KPI voice helpdesk classifier."
+requires-python = ">=3.11"
+dependencies = [
+  "datasets>=2.20.0",
+  "peft>=0.12.0",
+  "pydantic>=2.8.0",
+  "pyyaml>=6.0.2",
+  "torch>=2.3.0",
+  "tqdm>=4.66.4",
+  "transformers>=4.44.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

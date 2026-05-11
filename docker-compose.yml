@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: kpi-helpdesk-postgres
+    environment:
+      POSTGRES_DB: kpi_helpdesk
+      POSTGRES_USER: kpi_helpdesk
+      POSTGRES_PASSWORD: kpi_helpdesk
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kpi_helpdesk -d kpi_helpdesk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+
