@@ -9,6 +9,15 @@ import torch
 import yaml
 from peft import PeftModel
 
+BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app.services.classifier_prompt import (  # noqa: E402
+    CatalogItem,
+    build_classifier_messages,
+)
+
 
 def install_sklearn_stub() -> None:
     """Avoid importing Windows-unstable sklearn/pyarrow during plain generation."""
@@ -60,84 +69,12 @@ def split_examples(examples: list[dict]) -> dict[str, list[dict]]:
     }
 
 
-def read_catalog_items(path: Path) -> list[dict[str, str]]:
+def read_catalog_items(path: Path) -> list[CatalogItem]:
     catalog = yaml.safe_load(path.read_text(encoding="utf-8"))
     descriptions = catalog.get("category_descriptions", {})
     return [
-        {
-            "name": name,
-            "department": department,
-            "description": descriptions.get(name, ""),
-        }
+        CatalogItem(name=name, description=descriptions.get(name, department))
         for name, department in catalog["categories"].items()
-    ]
-
-
-def read_catalog_categories(path: Path) -> list[str]:
-    return [item["name"] for item in read_catalog_items(path)]
-
-
-def shorten_text(text: str, max_chars: int = 320) -> str:
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= max_chars:
-        return cleaned
-    return cleaned[:max_chars].rsplit(" ", 1)[0].strip()
-
-
-def category_guide(category_items: list[dict[str, str]] | list[str]) -> str:
-    lines = []
-    for item in category_items:
-        if isinstance(item, str):
-            lines.append(f"- {item}")
-        else:
-            details = shorten_text(item.get("description") or "звернення цієї теми", max_chars=45)
-            lines.append(f"- {item['name']}: {details}")
-    return "\n".join(lines)
-
-
-def routing_hints() -> str:
-    return (
-        "довідки/середній бал/підпис/наказ -> деканат / довідки студентів; "
-        "розклад/сесія/оцінювання/заборгованість до відрахування -> навчальний процес; "
-        "поновлення/переведення/академвідпустка/відрахування -> переведення / поновлення / відрахування; "
-        "оцінки/ролі/курси саме в Електронному кампусі -> Електронний кампус; "
-        "диплом/дублікат/апостиль -> документи про освіту; "
-        "вступна заява/кабінет вступника/підготовчі курси -> вступ; "
-        "посвідка/віза/ДМС іноземця -> міжнародні студенти; "
-        "Wi-Fi/VPN/Moodle/пошта -> мережа / пошта / інтернет; "
-        "Scopus/Web of Science/книги -> бібліотека."
-    )
-
-
-def make_messages(example: dict, category_items: list[dict[str, str]] | list[str]) -> list[dict]:
-    ticket_text = shorten_text(example["text"])
-    category_names = [item if isinstance(item, str) else item["name"] for item in category_items]
-    categories = ", ".join(category_names)
-    return [
-        {
-            "role": "system",
-            "content": "You are a strict JSON classifier for Ukrainian university helpdesk tickets.",
-        },
-        {
-            "role": "user",
-            "content": (
-                "Класифікуй звернення до довідкової системи КПІ. "
-                "Поверни тільки валідний JSON без Markdown з полями "
-                "category, priority.\n"
-                f"Доступні категорії: {categories}\n"
-                "Обирай категорію за відповідальним підрозділом, а не за випадковим словом у тексті.\n"
-                "Поле category має точно збігатися з однією доступною категорією.\n"
-                "Якщо в тексті згадано кілька тем, обирай категорію того підрозділу, "
-                "який має виконати основну дію або вирішити блокування.\n"
-                "Пріоритети: low, medium, high.\n"
-                "low - довідкове питання без блокування; medium - стандартне робоче звернення; "
-                "high - заблокована дія, втрата доступу, гроші, дедлайн, безпека або ризик відрахування.\n"
-                "Не став medium за замовчуванням: якщо користувач лише питає де/як/коли без блокування - low; "
-                "якщо дія вже не працює, є дедлайн, кошти, доступ, безпека або юридичний ризик - high.\n"
-                f"Роль автора: {example['role']}\n"
-                f"Текст звернення: {ticket_text}"
-            ),
-        },
     ]
 
 
@@ -201,7 +138,7 @@ def main() -> None:
 
     examples = split_examples(read_jsonl(Path(config["dataset_path"])))[args.split]
     category_items = read_catalog_items(Path(config["catalog_path"]))
-    category_names = [item["name"] for item in category_items]
+    category_names = [item.name for item in category_items]
     tokenizer = AutoTokenizer.from_pretrained(config["base_model"], trust_remote_code=True)
     base_model = AutoModelForCausalLM.from_pretrained(
         config["base_model"],
@@ -220,7 +157,11 @@ def main() -> None:
     predictions: list[dict] = []
 
     for index, example in enumerate(examples, start=1):
-        messages = make_messages({**example, "category": "", "priority": "low"}, category_items)[:2]
+        messages = build_classifier_messages(
+            role=example["role"],
+            text=example["text"],
+            categories=category_items,
+        )
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         with torch.no_grad():

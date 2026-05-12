@@ -1,4 +1,6 @@
+from app.models.enums import UserRole
 from app.services.classifier import TicketClassifierService
+from app.services.classifier_prompt import CatalogItem
 
 
 def test_classifier_json_extraction() -> None:
@@ -7,6 +9,21 @@ def test_classifier_json_extraction() -> None:
     parsed = TicketClassifierService._parse_json(raw)
 
     assert parsed == {"category": "стипендія", "priority": "medium"}
+
+
+def test_classifier_prompt_includes_category_descriptions() -> None:
+    prompt = TicketClassifierService._build_prompt(
+        role=UserRole.student,
+        text="Не бачу стипендіальний рейтинг у кабінеті.",
+        categories=[
+            CatalogItem(name="стипендія", description="рейтинги, виплати, банківські реквізити"),
+            CatalogItem(name="навчальний процес", description="розклад, сесія, практики"),
+        ],
+    )
+
+    assert "Доступні категорії та орієнтири" in prompt
+    assert "стипендія (рейтинги, виплати" in prompt
+    assert "Текст звернення: Не бачу стипендіальний рейтинг у кабінеті." in prompt
 
 
 def test_classifier_replaces_generated_confidence_with_service_score() -> None:

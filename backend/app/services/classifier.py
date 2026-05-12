@@ -2,7 +2,6 @@ import importlib.machinery
 import json
 import sys
 import types
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import get_settings
 from app.models.enums import Priority, UserRole
+from app.services.classifier_prompt import (
+    CatalogItem,
+    build_classifier_messages,
+    build_classifier_prompt,
+)
 
 settings = get_settings()
 
@@ -19,12 +23,6 @@ class ClassificationOutput(BaseModel):
     category: str = Field(min_length=2)
     priority: Priority
     confidence: float = Field(ge=0, le=1)
-
-
-@dataclass(frozen=True)
-class CatalogItem:
-    name: str
-    description: str | None = None
 
 
 def install_sklearn_stub() -> None:
@@ -90,53 +88,22 @@ class TicketClassifierService:
         text: str,
         categories: list[CatalogItem],
     ) -> ClassificationOutput:
-        prompt = self._build_prompt(role=role, text=text, categories=categories)
-        raw = self._generate(prompt)
+        messages = build_classifier_messages(role=role, text=text, categories=categories)
+        raw = self._generate(messages)
         parsed = self._parse_json(raw)
         allowed_categories = {item.name for item in categories}
         return self._validated_output(parsed, allowed_categories)
 
+    @staticmethod
     def _build_prompt(
-        self,
         *,
         role: UserRole,
         text: str,
         categories: list[CatalogItem],
     ) -> str:
-        def compact(value: str, max_chars: int = 320) -> str:
-            cleaned = " ".join(value.split())
-            if len(cleaned) <= max_chars:
-                return cleaned
-            return cleaned[:max_chars].rsplit(" ", 1)[0].strip()
+        return build_classifier_prompt(role=role, text=text, categories=categories)
 
-        category_names = ", ".join(item.name for item in categories)
-        ticket_text = compact(text, max_chars=320)
-        return (
-            "Класифікуй звернення до довідкової системи КПІ. "
-            "Поверни тільки валідний JSON без Markdown з полями "
-            "category, priority.\n"
-            f"Доступні категорії: {category_names}\n"
-            "Обирай категорію за відповідальним підрозділом, а не за випадковим словом у тексті.\n"
-            "Поле category має точно збігатися з однією доступною категорією.\n"
-            "Якщо в тексті згадано кілька тем, обирай категорію того підрозділу, "
-            "який має виконати основну дію або вирішити блокування.\n"
-            "Пріоритети: low, medium, high.\n"
-            "low - довідкове питання без блокування; medium - стандартне робоче звернення; "
-            "high - заблокована дія, втрата доступу, гроші, дедлайн, безпека або ризик відрахування.\n"
-            "Не став medium за замовчуванням: якщо користувач лише питає де/як/коли без блокування - low; "
-            "якщо дія вже не працює, є дедлайн, кошти, доступ, безпека або юридичний ризик - high.\n"
-            f"Роль автора: {role.value}\n"
-            f"Текст звернення: {ticket_text}\n"
-        )
-
-    def _generate(self, prompt: str) -> str:
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a strict JSON classifier for Ukrainian university helpdesk tickets.",
-            },
-            {"role": "user", "content": prompt},
-        ]
+    def _generate(self, messages: list[dict[str, str]]) -> str:
         if hasattr(self.tokenizer, "apply_chat_template"):
             model_input = self.tokenizer.apply_chat_template(
                 messages,
@@ -144,7 +111,7 @@ class TicketClassifierService:
                 add_generation_prompt=True,
             )
         else:
-            model_input = prompt
+            model_input = messages[-1]["content"]
 
         inputs = self.tokenizer(model_input, return_tensors="pt").to(self.model.device)
         with self.torch.no_grad():

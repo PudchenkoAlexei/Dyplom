@@ -2,7 +2,7 @@ base_model: Qwen/Qwen3-1.7B
 dataset_path: ml/data/curated/tickets_curated.jsonl
 catalog_path: ml/configs/catalog.yaml
 output_dir: ml/models/qwen3-kpi-lora
-max_length: 1024
+max_length: 1280
 gradient_checkpointing: true
 train_split: train
 eval_split: validation

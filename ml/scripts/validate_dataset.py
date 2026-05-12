@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 
-EXPECTED_SPLIT_LAYOUT = {"train": 50, "validation": 5, "test": 5}
+EXPECTED_SPLIT_LAYOUT = {"train": 54, "validation": 5, "test": 5}
 EXPECTED_PER_CATEGORY = sum(EXPECTED_SPLIT_LAYOUT.values())
 
 
