@@ -105,6 +105,26 @@ http://127.0.0.1:8000/health
 
 Важливо для GitHub: `.env`, `.run/`, `node_modules/`, `.next/`, `ml/models/`, `ml/outputs/` і завантажені аудіофайли не додаються в репозиторій. Після клонування проекту LoRA-адаптер потрібно або навчити командою з розділу ML, або окремо покласти в шлях `ml/models/qwen3-kpi-lora`.
 
+## Production і безпека
+
+Backend має окремі перевірки production-конфігурації. Якщо `ENVIRONMENT` не дорівнює `development`, застосунок не стартує з development JWT secret, небезпечними cookies, wildcard CORS або wildcard `ALLOWED_HOSTS`.
+
+Для production потрібно явно налаштувати:
+
+```env
+ENVIRONMENT=production
+JWT_SECRET_KEY=<long-random-secret>
+COOKIE_SECURE=true
+COOKIE_SAMESITE=lax
+CORS_ORIGINS=["https://your-frontend-domain"]
+ALLOWED_HOSTS=["your-api-domain"]
+SECURITY_HEADERS_ENABLED=true
+```
+
+API додає базові security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, а в HTTPS production-режимі також `Strict-Transport-Security`.
+Завантаження аудіо обмежене списком MIME-типів з `ALLOWED_AUDIO_MIME_TYPES`, максимальним розміром `MAX_AUDIO_MB`, а порожні аудіофайли відхиляються.
+Помилки класифікатора логуються на backend, але в подію заявки записується безпечне узагальнене повідомлення без внутрішніх шляхів або stack trace.
+
 ## Тестові користувачі
 
 ```text
@@ -177,6 +197,8 @@ Backend не використовує keyword-based виправлення ка�
 ```
 
 Підрозділ не генерується моделлю. Backend бере його з каталогу `ml/configs/catalog.yaml`.
+Для класифікаційних prompt-ів Qwen3 запускається без thinking mode (`enable_thinking=False`), тому inference орієнтований на короткий JSON без службових `<think>...</think>` блоків.
+Поле `confidence` у backend є службовим routing score, а не ймовірністю, яку обчислила або згенерувала модель.
 
 Поточна ML-схема:
 
@@ -185,22 +207,26 @@ Backend не використовує keyword-based виправлення ка�
 - адаптер: `ml/models/qwen3-kpi-lora`;
 - датасет: `ml/data/curated/tickets_curated.jsonl`;
 - 16 категорій;
-- 60 прикладів на категорію;
-- 960 прикладів загалом;
-- split: 800 train, 80 validation, 80 test;
+- 64 приклади на категорію;
+- 1024 приклади загалом;
+- split: 864 train, 80 validation, 80 test;
 - пріоритети: `low`, `medium`, `high`.
+
+Паспорт поточної ML-компоненти з параметрами навчання, dataset version, метриками та обмеженнями зберігається у `ml/MODEL_CARD.md`.
 
 Поточні метрики адаптера:
 
 ```text
 test split:
-category accuracy = 0.875
-priority accuracy = 0.75
+category accuracy = 0.9375
+priority accuracy = 0.825
 
 100 generated questions:
 category accuracy = 0.91
 priority accuracy = 0.78
 ```
+
+Якщо модель повертає невалідний JSON, некоректний schema або категорію поза каталогом, backend не втрачає заявку: застосовується fallback у категорію `інше / первинна маршрутизація` зі службовим routing score `0.35`.
 
 Навчання та оцінювання:
 
@@ -244,7 +270,7 @@ ML:
 - LoRA;
 - Qwen3;
 - datasets;
-- scikit-learn для оцінювання метрик.
+- власні скрипти оцінювання accuracy, precision, recall і F1.
 
 Інфраструктура:
 
@@ -277,6 +303,7 @@ frontend/
   src/types/               TypeScript domain types
 
 ml/
+  MODEL_CARD.md             паспорт поточної ML-компоненти
   configs/                 каталог категорій і конфіг навчання
   data/curated/            фінальний curated dataset
   models/                  LoRA adapter

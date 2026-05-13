@@ -14,9 +14,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from ml.training.evaluate_classifier import (  # noqa: E402
     extract_json,
-    make_messages,
-    read_catalog_categories,
     read_catalog_items,
+)
+from app.services.classifier_prompt import (  # noqa: E402
+    CatalogItem,
+    apply_classifier_chat_template,
+    build_classifier_messages,
 )
 
 
@@ -206,7 +209,7 @@ def validate_examples(examples: list[dict], category_names: list[str]) -> None:
 def classify_examples(
     examples: list[dict],
     config: dict,
-    category_items: list[dict[str, str]],
+    category_items: list[CatalogItem],
 ) -> tuple[list[dict], list[dict]]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -223,16 +226,12 @@ def classify_examples(
     results: list[dict] = []
     failures: list[dict] = []
     for index, example in enumerate(examples, start=1):
-        messages = make_messages(
-            {
-                "role": example["role"],
-                "text": example["text"],
-                "category": "",
-                "priority": "medium",
-            },
-            category_items,
+        messages = build_classifier_messages(
+            role=example["role"],
+            text=example["text"],
+            categories=category_items,
         )
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = apply_classifier_chat_template(tokenizer, messages, add_generation_prompt=True)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         with torch.no_grad():
             output = model.generate(
@@ -351,7 +350,7 @@ def main() -> None:
     config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     catalog_path = Path(config["catalog_path"])
     category_items = read_catalog_items(catalog_path)
-    category_names = read_catalog_categories(catalog_path)
+    category_names = [item.name for item in category_items]
     examples = generated_examples()
     validate_examples(examples, category_names)
 

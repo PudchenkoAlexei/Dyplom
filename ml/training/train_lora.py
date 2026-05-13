@@ -14,6 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.classifier_prompt import (  # noqa: E402
+    apply_classifier_chat_template,
     CatalogItem,
     build_classifier_messages,
     classifier_response_json,
@@ -75,8 +76,16 @@ def main() -> None:
             categories=category_items,
             assistant_response=classifier_response_json(example["category"], example["priority"]),
         )
-        prompt = tokenizer.apply_chat_template(messages[:2], tokenize=False, add_generation_prompt=True)
-        text = tokenizer.apply_chat_template(messages, tokenize=False)
+        prompt = apply_classifier_chat_template(
+            tokenizer,
+            messages[:2],
+            add_generation_prompt=True,
+        )
+        text = apply_classifier_chat_template(
+            tokenizer,
+            messages,
+            add_generation_prompt=False,
+        )
         tokenized = tokenizer(
             text,
             truncation=True,

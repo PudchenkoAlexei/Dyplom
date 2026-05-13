@@ -32,7 +32,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         max_age=settings.access_token_expire_minutes * 60,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.cookie_samesite,
         domain=settings.cookie_domain,
     )
     response.set_cookie(
@@ -41,14 +41,24 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.cookie_samesite,
         domain=settings.cookie_domain,
     )
 
 
 def _clear_auth_cookies(response: Response) -> None:
-    response.delete_cookie("access_token", domain=settings.cookie_domain)
-    response.delete_cookie("refresh_token", domain=settings.cookie_domain)
+    response.delete_cookie(
+        "access_token",
+        domain=settings.cookie_domain,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+    )
+    response.delete_cookie(
+        "refresh_token",
+        domain=settings.cookie_domain,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+    )
 
 
 async def _issue_session(db: AsyncSession, response: Response, user: User) -> None:

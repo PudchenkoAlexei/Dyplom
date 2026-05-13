@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
+from typing import Any, Mapping
 
 SYSTEM_PROMPT = "You are a strict JSON classifier for Ukrainian university helpdesk tickets."
 
@@ -82,6 +82,27 @@ def classifier_response_json(category: str, priority: str) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def apply_classifier_chat_template(
+    tokenizer: Any,
+    messages: list[dict[str, str]],
+    *,
+    add_generation_prompt: bool,
+) -> str:
+    if not hasattr(tokenizer, "apply_chat_template"):
+        return messages[-1]["content"]
+
+    kwargs = {
+        "tokenize": False,
+        "add_generation_prompt": add_generation_prompt,
+    }
+    try:
+        return tokenizer.apply_chat_template(messages, **kwargs, enable_thinking=False)
+    except TypeError as exc:
+        if "enable_thinking" not in str(exc):
+            raise
+        return tokenizer.apply_chat_template(messages, **kwargs)
 
 
 def build_classifier_prompt(

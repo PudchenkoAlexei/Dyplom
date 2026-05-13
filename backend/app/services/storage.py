@@ -9,7 +9,7 @@ from app.core.config import PROJECT_ROOT, get_settings
 
 settings = get_settings()
 
-ALLOWED_AUDIO_TYPES = {
+SUPPORTED_AUDIO_TYPES = {
     "audio/webm": ".webm",
     "audio/wav": ".wav",
     "audio/x-wav": ".wav",
@@ -17,6 +17,15 @@ ALLOWED_AUDIO_TYPES = {
     "audio/mp4": ".m4a",
     "audio/ogg": ".ogg",
 }
+
+
+def allowed_audio_types() -> dict[str, str]:
+    configured = set(settings.allowed_audio_mime_types)
+    return {
+        mime_type: suffix
+        for mime_type, suffix in SUPPORTED_AUDIO_TYPES.items()
+        if mime_type in configured
+    }
 
 
 class StoredAudio:
@@ -28,7 +37,8 @@ class StoredAudio:
 
 async def save_ticket_audio(ticket_id: UUID, upload: UploadFile) -> StoredAudio:
     mime_type = upload.content_type or "application/octet-stream"
-    if mime_type not in ALLOWED_AUDIO_TYPES:
+    allowed_types = allowed_audio_types()
+    if mime_type not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Unsupported audio type: {mime_type}.",
@@ -36,7 +46,7 @@ async def save_ticket_audio(ticket_id: UUID, upload: UploadFile) -> StoredAudio:
 
     directory = settings.audio_storage_dir / str(ticket_id)
     directory.mkdir(parents=True, exist_ok=True)
-    suffix = ALLOWED_AUDIO_TYPES[mime_type]
+    suffix = allowed_types[mime_type]
     file_path = directory / f"{uuid4()}{suffix}"
 
     size = 0
@@ -52,6 +62,13 @@ async def save_ticket_audio(ticket_id: UUID, upload: UploadFile) -> StoredAudio:
                         detail=f"Audio file is larger than {settings.max_audio_mb} MB.",
                     ) from None
             await out_file.write(chunk)
+
+    if size == 0:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Audio file is empty.",
+        )
 
     return StoredAudio(file_path=file_path, mime_type=mime_type, size_bytes=size)
 

@@ -14,6 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.classifier_prompt import (  # noqa: E402
+    apply_classifier_chat_template,
     CatalogItem,
     build_classifier_messages,
 )
@@ -162,7 +163,7 @@ def main() -> None:
             text=example["text"],
             categories=category_items,
         )
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = apply_classifier_chat_template(tokenizer, messages, add_generation_prompt=True)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         with torch.no_grad():
             output = model.generate(

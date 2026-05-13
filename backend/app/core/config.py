@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -30,12 +30,25 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 14
     cookie_secure: bool = False
     cookie_domain: str | None = None
+    cookie_samesite: str = "lax"
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
+    allowed_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1", "testserver"])
+    security_headers_enabled: bool = True
 
     audio_storage_dir: Path = PROJECT_ROOT / "backend/storage/audio"
     max_audio_mb: int = 30
+    allowed_audio_mime_types: list[str] = Field(
+        default_factory=lambda: [
+            "audio/webm",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/mpeg",
+            "audio/mp4",
+            "audio/ogg",
+        ]
+    )
 
     whisper_model_size: str = "medium"
     whisper_device: str = "cpu"
@@ -53,6 +66,30 @@ class Settings(BaseSettings):
             return value
         return (PROJECT_ROOT / value).resolve()
 
+    @field_validator("cookie_samesite", mode="after")
+    @classmethod
+    def validate_cookie_samesite(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in {"lax", "strict", "none"}:
+            raise ValueError("COOKIE_SAMESITE must be one of: lax, strict, none.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        if self.environment == "development":
+            return self
+        if self.jwt_secret_key.startswith("change-this"):
+            raise RuntimeError("JWT_SECRET_KEY must be changed outside development.")
+        if not self.cookie_secure:
+            raise RuntimeError("COOKIE_SECURE must be true outside development.")
+        if self.cookie_samesite == "none" and not self.cookie_secure:
+            raise RuntimeError("COOKIE_SAMESITE=none requires secure cookies.")
+        if "*" in self.cors_origins:
+            raise RuntimeError("CORS_ORIGINS cannot contain '*' outside development.")
+        if "*" in self.allowed_hosts:
+            raise RuntimeError("ALLOWED_HOSTS cannot contain '*' outside development.")
+        return self
+
     @property
     def max_audio_bytes(self) -> int:
         return self.max_audio_mb * 1024 * 1024
@@ -60,7 +97,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    settings = Settings()
-    if settings.environment != "development" and settings.jwt_secret_key.startswith("change-this"):
-        raise RuntimeError("JWT_SECRET_KEY must be changed outside development.")
-    return settings
+    return Settings()

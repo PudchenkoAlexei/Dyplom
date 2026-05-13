@@ -1,4 +1,8 @@
+import hashlib
+import json
+import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -34,10 +38,14 @@ from app.services.classifier import CatalogItem, get_classifier_service
 from app.services.events import add_ticket_event
 from app.services.storage import delete_audio_file, resolve_audio_path, save_ticket_audio
 from app.services.stt import get_stt_service
-from app.core.config import get_settings
+from app.core.config import PROJECT_ROOT, get_settings
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
+MODEL_DATASET_PATH = PROJECT_ROOT / "ml/data/curated/tickets_curated.jsonl"
+TEST_METRICS_PATH = PROJECT_ROOT / "ml/outputs/evaluation_metrics.json"
+GENERATED_METRICS_PATH = PROJECT_ROOT / "ml/outputs/generated_100_eval_metrics.json"
 
 
 def _ticket_options(include_author: bool = False) -> list:
@@ -52,6 +60,50 @@ def _ticket_options(include_author: bool = False) -> list:
         selectinload(Ticket.assigned_operator),
     ]
     return options
+
+
+def _file_sha256_prefix(path: Path, length: int = 12) -> str | None:
+    if not path.exists():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()[:length]
+
+
+def _current_dataset_version() -> str | None:
+    digest = _file_sha256_prefix(MODEL_DATASET_PATH)
+    return f"tickets_curated:{digest}" if digest else None
+
+
+def _compact_metrics(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    keys = [
+        "split",
+        "count",
+        "parsed",
+        "parse_failures",
+        "category_accuracy",
+        "priority_accuracy",
+        "difficulty",
+        "unknown_categories",
+    ]
+    return {key: data[key] for key in keys if key in data}
+
+
+def _current_metrics_snapshot() -> dict | None:
+    metrics = {
+        "test": _compact_metrics(TEST_METRICS_PATH),
+        "generated_100": _compact_metrics(GENERATED_METRICS_PATH),
+    }
+    compacted = {key: value for key, value in metrics.items() if value is not None}
+    return compacted or None
 
 
 async def _get_ticket(db: AsyncSession, ticket_id: UUID, include_author: bool = False) -> Ticket:
@@ -155,15 +207,26 @@ async def _existing_draft_response(
 
 async def _get_model_version(db: AsyncSession) -> ModelVersion:
     name = f"{settings.llm_base_model}:{settings.lora_adapter_path}"
+    dataset_version = _current_dataset_version()
+    metrics_json = _current_metrics_snapshot()
     version = await db.scalar(select(ModelVersion).where(ModelVersion.name == name))
     if version:
+        changed = False
+        if dataset_version and version.dataset_version != dataset_version:
+            version.dataset_version = dataset_version
+            changed = True
+        if metrics_json and version.metrics_json != metrics_json:
+            version.metrics_json = metrics_json
+            changed = True
+        if changed:
+            await db.flush()
         return version
     version = ModelVersion(
         name=name,
         base_model=settings.llm_base_model,
         lora_adapter_path=str(settings.lora_adapter_path),
-        dataset_version=None,
-        metrics_json=None,
+        dataset_version=dataset_version,
+        metrics_json=metrics_json,
     )
     db.add(version)
     await db.flush()
@@ -464,13 +527,17 @@ async def submit_ticket(
             text=ticket.edited_text,
             categories=[_category_catalog_item(item) for item in categories],
         )
-    except RuntimeError as exc:
+    except RuntimeError:
+        logger.exception("Ticket classification failed for ticket %s.", ticket.id)
         await add_ticket_event(
             db,
             ticket_id=ticket.id,
             actor_id=None,
             event_type=TicketEventType.status_changed,
-            new_value={"classification_status": "failed", "reason": str(exc)},
+            new_value={
+                "classification_status": "failed",
+                "reason": "Classifier service failed. Ticket remains in submitted state.",
+            },
         )
         await db.commit()
         return await _get_ticket(db, ticket.id)
@@ -505,7 +572,21 @@ async def submit_ticket(
         await db.commit()
         return await _get_ticket(db, ticket.id)
     department = default_department
-    prediction_note = "Категорію і пріоритет визначено мовною моделлю; підрозділ взято з каталогу категорій."
+    if classification.fallback_reason:
+        logger.warning(
+            "Ticket %s classified through fallback route: %s",
+            ticket.id,
+            classification.fallback_reason,
+        )
+        prediction_note = (
+            "Застосовано fallback-маршрутизацію: модель не повернула придатний результат, "
+            "тому заявку передано в первинну маршрутизацію."
+        )
+    else:
+        prediction_note = (
+            "Категорію і пріоритет визначено мовною моделлю; підрозділ взято з каталогу категорій. "
+            "Поле confidence є службовим routing score, а не ймовірністю, згенерованою моделлю."
+        )
     prediction_raw = classification.model_dump(mode="json") | {"route_to": department.name}
 
     model_version = await _get_model_version(db)

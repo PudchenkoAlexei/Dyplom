@@ -17,6 +17,12 @@ import torch
 import yaml
 from peft import PeftModel
 
+BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app.services.classifier_prompt import apply_classifier_chat_template  # noqa: E402
+
 
 def install_sklearn_stub() -> None:
     if "sklearn" in sys.modules:
@@ -155,7 +161,7 @@ def main() -> None:
 
     for i, (text, expected_cat, expected_prio, note) in enumerate(SMOKE_QUERIES, 1):
         messages = make_prompt(text, "student", categories)
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = apply_classifier_chat_template(tokenizer, messages, add_generation_prompt=True)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         t1 = time.time()
         with torch.no_grad():
