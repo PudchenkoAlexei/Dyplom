@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+import { LoadingState } from "@/components/FeedbackState";
 import { useAuth } from "@/lib/auth";
 import type { UserRole } from "@/types/domain";
 
@@ -25,9 +26,12 @@ export function AuthGuard({
   }, [loading, user, roles, router]);
 
   if (loading || !user || (roles && !roles.includes(user.role))) {
-    return <main className="center-screen">Завантаження...</main>;
+    return (
+      <main className="center-screen">
+        <LoadingState message="Перевіряємо доступ..." />
+      </main>
+    );
   }
 
   return <>{children}</>;
 }
-

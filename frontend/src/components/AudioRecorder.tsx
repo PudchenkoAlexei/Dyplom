@@ -1,7 +1,7 @@
 "use client";
 
 import { Mic, Pause, RotateCcw, Square, Upload } from "lucide-react";
-import { ChangeEvent, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 interface ReadyRecording {
   blob: Blob;
@@ -91,6 +91,16 @@ export function AudioRecorder({
   const [state, setState] = useState<"idle" | "recording" | "paused">("idle");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      speechRecognitionRef.current?.abort();
+      speechRecognitionRef.current = null;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
+  }, [audioUrl]);
 
   function updateLiveTranscript(text: string) {
     onTranscriptChange?.(text);

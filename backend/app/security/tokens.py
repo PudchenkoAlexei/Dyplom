@@ -36,4 +36,3 @@ def create_refresh_token() -> tuple[str, str, datetime]:
 
 def hash_refresh_token(token: str) -> str:
     return sha256(token.encode("utf-8")).hexdigest()
-

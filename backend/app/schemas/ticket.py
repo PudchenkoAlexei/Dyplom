@@ -98,6 +98,13 @@ class OperatorTicketRead(TicketRead):
     author: UserRead
 
 
+class OperatorTicketPage(BaseModel):
+    items: list[OperatorTicketRead]
+    total: int
+    limit: int
+    offset: int
+
+
 class TicketFilter(BaseModel):
     status: TicketStatus | None = None
     assigned_to_me: bool | None = None

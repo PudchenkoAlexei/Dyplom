@@ -56,4 +56,3 @@ class SpeechToTextService:
 @lru_cache
 def get_stt_service() -> SpeechToTextService:
     return SpeechToTextService()
-

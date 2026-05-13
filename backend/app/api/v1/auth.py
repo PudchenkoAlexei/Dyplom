@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from app.schemas.common import MessageResponse
 from app.schemas.user import UserCreate, UserLogin, UserRead
 from app.security.deps import get_current_user
 from app.security.passwords import hash_password, verify_password
+from app.security.rate_limit import check_rate_limit
 from app.security.tokens import (
     create_access_token,
     create_refresh_token,
@@ -70,7 +71,19 @@ async def _issue_session(db: AsyncSession, response: Response, user: User) -> No
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserCreate, response: Response, db: AsyncSession = Depends(get_db)) -> User:
+async def register(
+    payload: UserCreate,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    await check_rate_limit(
+        request,
+        scope="auth-register",
+        identifier=payload.email,
+        limit=5,
+        window_seconds=60,
+    )
     if payload.role not in {UserRole.student, UserRole.teacher}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -99,7 +112,9 @@ async def register(payload: UserCreate, response: Response, db: AsyncSession = D
 
     existing = await db.scalar(select(User).where(User.email == payload.email.lower()))
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Email is already registered."
+        )
 
     user = User(
         email=payload.email.lower(),
@@ -116,7 +131,19 @@ async def register(payload: UserCreate, response: Response, db: AsyncSession = D
 
 
 @router.post("/login", response_model=UserRead)
-async def login(payload: UserLogin, response: Response, db: AsyncSession = Depends(get_db)) -> User:
+async def login(
+    payload: UserLogin,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    await check_rate_limit(
+        request,
+        scope="auth-login",
+        identifier=payload.email,
+        limit=5,
+        window_seconds=60,
+    )
     user = await db.scalar(select(User).where(User.email == payload.email.lower()))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
@@ -134,13 +161,17 @@ async def refresh(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     if not refresh_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token."
+        )
 
     refresh_hash = hash_refresh_token(refresh_token)
     token_row = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == refresh_hash))
     now = datetime.now(timezone.utc)
     if not token_row or token_row.revoked_at or token_row.expires_at <= now:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token."
+        )
 
     user = await db.get(User, token_row.user_id)
     if not user or not user.is_active:
@@ -159,7 +190,9 @@ async def logout(
 ) -> MessageResponse:
     if refresh_token:
         refresh_hash = hash_refresh_token(refresh_token)
-        token_row = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == refresh_hash))
+        token_row = await db.scalar(
+            select(RefreshToken).where(RefreshToken.token_hash == refresh_hash)
+        )
         if token_row and not token_row.revoked_at:
             token_row.revoked_at = datetime.now(timezone.utc)
             await db.commit()

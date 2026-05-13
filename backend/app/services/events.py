@@ -25,4 +25,3 @@ async def add_ticket_event(
     )
     db.add(event)
     return event
-

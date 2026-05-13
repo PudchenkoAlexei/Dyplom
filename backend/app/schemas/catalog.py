@@ -31,4 +31,3 @@ class CategoryRead(Timestamped):
     name: str
     description: str | None
     default_department_id: UUID | None
-

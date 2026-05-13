@@ -33,7 +33,9 @@ async def create_department(
 ) -> Department:
     existing = await db.scalar(select(Department).where(Department.name == payload.name))
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Department already exists.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Department already exists."
+        )
     department = Department(**payload.model_dump())
     db.add(department)
     await db.commit()
@@ -59,7 +61,9 @@ async def create_category(
     if payload.default_department_id:
         department = await db.get(Department, payload.default_department_id)
         if not department:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Department not found."
+            )
     category = Category(**payload.model_dump())
     db.add(category)
     await db.commit()
@@ -82,4 +86,3 @@ async def update_category(
     await db.commit()
     await db.refresh(category)
     return category
-

@@ -78,7 +78,9 @@ class TicketClassifierService:
             ) from exc
 
         self.torch = torch
-        self.tokenizer = AutoTokenizer.from_pretrained(settings.llm_base_model, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            settings.llm_base_model, trust_remote_code=True
+        )
         base_model = AutoModelForCausalLM.from_pretrained(
             settings.llm_base_model,
             device_map=settings.llm_device,

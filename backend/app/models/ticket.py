@@ -154,7 +154,9 @@ class TicketEvent(UUIDPrimaryKeyMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         index=True,
     )
-    event_type: Mapped[TicketEventType] = mapped_column(Enum(TicketEventType, name="ticket_event_type"))
+    event_type: Mapped[TicketEventType] = mapped_column(
+        Enum(TicketEventType, name="ticket_event_type")
+    )
     old_value: Mapped[dict | None] = mapped_column(JSONB)
     new_value: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -97,3 +97,10 @@ export interface Ticket {
   author?: User;
   assigned_operator?: User | null;
 }
+
+export interface OperatorTicketPage {
+  items: Ticket[];
+  total: number;
+  limit: number;
+  offset: number;
+}

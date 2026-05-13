@@ -5,11 +5,13 @@ import pytest
 from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
+from starlette.requests import Request
 
 from app.core.config import Settings
 from app.main import create_app
 from app.models.enums import UserRole
 from app.security.passwords import hash_password, verify_password
+from app.security.rate_limit import check_rate_limit
 from app.security.tokens import create_access_token, decode_access_token
 from app.services import storage
 
@@ -66,3 +68,34 @@ async def test_empty_audio_upload_is_rejected(tmp_path, monkeypatch) -> None:
         await storage.save_ticket_audio(uuid4(), upload)
 
     assert exc_info.value.status_code == 422
+
+
+async def test_rate_limit_rejects_excess_attempts() -> None:
+    request = Request({"type": "http", "client": ("127.0.0.1", 1234), "headers": []})
+    scope = f"test-{uuid4()}"
+
+    await check_rate_limit(
+        request,
+        scope=scope,
+        identifier="student@example.com",
+        limit=2,
+        window_seconds=60,
+    )
+    await check_rate_limit(
+        request,
+        scope=scope,
+        identifier="student@example.com",
+        limit=2,
+        window_seconds=60,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_rate_limit(
+            request,
+            scope=scope,
+            identifier="student@example.com",
+            limit=2,
+            window_seconds=60,
+        )
+
+    assert exc_info.value.status_code == 429

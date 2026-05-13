@@ -510,10 +510,54 @@ a {
   border-radius: 8px;
   color: var(--muted);
   display: flex;
+  gap: 10px;
   justify-content: center;
   min-height: 160px;
   padding: 24px;
   text-align: center;
+}
+
+.feedback-state {
+  align-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  min-height: 120px;
+  padding: 20px;
+  text-align: center;
+}
+
+.feedback-error {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.feedback-error > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.pagination-bar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 960px) {
