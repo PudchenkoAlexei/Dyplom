@@ -62,6 +62,12 @@ export interface TicketMessage {
   id: string;
   sender_id: string;
   message: string;
+  audio_mime_type: string | null;
+  audio_size_bytes: number | null;
+  audio_duration_seconds: number | null;
+  transcript_text: string | null;
+  transcript_model: string | null;
+  transcript_language: string | null;
   created_at: string;
   updated_at: string;
 }

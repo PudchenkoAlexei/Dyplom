@@ -37,7 +37,8 @@ class SpeechToTextService:
             str(audio_path),
             language="uk",
             vad_filter=True,
-            beam_size=5,
+            beam_size=settings.whisper_beam_size,
+            condition_on_previous_text=False,
         )
         segment_list = list(segments)
         text = " ".join(segment.text.strip() for segment in segment_list).strip()

@@ -1,0 +1,27 @@
+{
+  "include": ["backend/app", "backend/alembic", "ml"],
+  "exclude": [
+    "**/__pycache__",
+    ".venv",
+    "venv",
+    "frontend/node_modules",
+    "frontend/.next",
+    "ml/models",
+    "ml/outputs"
+  ],
+  "reportPrivateImportUsage": "none",
+  "executionEnvironments": [
+    {
+      "root": "backend",
+      "extraPaths": ["backend"]
+    },
+    {
+      "root": "ml",
+      "extraPaths": [".", "backend", "ml"]
+    },
+    {
+      "root": ".",
+      "extraPaths": ["backend", "ml"]
+    }
+  ]
+}

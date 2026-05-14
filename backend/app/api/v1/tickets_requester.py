@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.tickets_support import (
     _delete_ticket_with_audio,
     _ensure_ticket_view_access,
+    _get_ticket_message,
     _existing_draft_response,
     _get_ticket,
     _make_title,
@@ -31,7 +32,7 @@ from app.schemas.ticket import (
 from app.security.deps import get_profile_ready_requester, get_profile_ready_user
 from app.services.events import add_ticket_event
 from app.services.ticket_classification import classify_submitted_ticket
-from app.services.storage import resolve_audio_path, save_ticket_audio
+from app.services.storage import delete_audio_file, resolve_audio_path, save_ticket_audio
 from app.services.stt import get_stt_service
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -67,47 +68,52 @@ async def create_draft_from_audio(
         raise
 
     stored_audio = await save_ticket_audio(ticket.id, audio)
-    transcription = await get_stt_service().transcribe(stored_audio.file_path)
+    try:
+        transcription = await get_stt_service().transcribe(stored_audio.file_path)
 
-    ticket.title = _make_title(transcription.text)
-    ticket.edited_text = transcription.text
-    ticket.audio = TicketAudio(
-        file_path=str(stored_audio.file_path),
-        original_filename=audio.filename,
-        mime_type=stored_audio.mime_type,
-        size_bytes=stored_audio.size_bytes,
-        duration_seconds=transcription.duration_seconds,
-    )
-    ticket.transcript = TicketTranscript(
-        raw_text=transcription.text,
-        edited_text=transcription.text,
-        stt_model=transcription.model_name,
-        language=transcription.language,
-    )
-    await add_ticket_event(
-        db,
-        ticket_id=ticket.id,
-        actor_id=current_user.id,
-        event_type=TicketEventType.created,
-        new_value={"status": TicketStatus.draft.value},
-    )
-    await add_ticket_event(
-        db,
-        ticket_id=ticket.id,
-        actor_id=current_user.id,
-        event_type=TicketEventType.audio_uploaded,
-        new_value={"mime_type": stored_audio.mime_type, "size_bytes": stored_audio.size_bytes},
-    )
-    await add_ticket_event(
-        db,
-        ticket_id=ticket.id,
-        actor_id=current_user.id,
-        event_type=TicketEventType.transcribed,
-        new_value={"stt_model": transcription.model_name, "language": transcription.language},
-    )
-    await db.commit()
+        ticket.title = _make_title(transcription.text)
+        ticket.edited_text = transcription.text
+        ticket.audio = TicketAudio(
+            file_path=str(stored_audio.file_path),
+            original_filename=audio.filename,
+            mime_type=stored_audio.mime_type,
+            size_bytes=stored_audio.size_bytes,
+            duration_seconds=transcription.duration_seconds,
+        )
+        ticket.transcript = TicketTranscript(
+            raw_text=transcription.text,
+            edited_text=transcription.text,
+            stt_model=transcription.model_name,
+            language=transcription.language,
+        )
+        await add_ticket_event(
+            db,
+            ticket_id=ticket.id,
+            actor_id=current_user.id,
+            event_type=TicketEventType.created,
+            new_value={"status": TicketStatus.draft.value},
+        )
+        await add_ticket_event(
+            db,
+            ticket_id=ticket.id,
+            actor_id=current_user.id,
+            event_type=TicketEventType.audio_uploaded,
+            new_value={"mime_type": stored_audio.mime_type, "size_bytes": stored_audio.size_bytes},
+        )
+        await add_ticket_event(
+            db,
+            ticket_id=ticket.id,
+            actor_id=current_user.id,
+            event_type=TicketEventType.transcribed,
+            new_value={"stt_model": transcription.model_name, "language": transcription.language},
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        delete_audio_file(str(stored_audio.file_path))
+        raise
     loaded = await _get_ticket(db, ticket.id)
-    return DraftTicketResponse(ticket=loaded, transcript_text=transcription.text)
+    return DraftTicketResponse(ticket=TicketRead.model_validate(loaded), transcript_text=transcription.text)
 
 
 @router.post(
@@ -145,46 +151,56 @@ async def create_draft_from_browser_transcript(
             return existing
         raise
 
-    if audio:
-        stored_audio = await save_ticket_audio(ticket.id, audio)
-        ticket.audio = TicketAudio(
-            file_path=str(stored_audio.file_path),
-            original_filename=audio.filename,
-            mime_type=stored_audio.mime_type,
-            size_bytes=stored_audio.size_bytes,
-            duration_seconds=None,
+    stored_audio = None
+    try:
+        if audio:
+            stored_audio = await save_ticket_audio(ticket.id, audio)
+            ticket.audio = TicketAudio(
+                file_path=str(stored_audio.file_path),
+                original_filename=audio.filename,
+                mime_type=stored_audio.mime_type,
+                size_bytes=stored_audio.size_bytes,
+                duration_seconds=None,
+            )
+            await add_ticket_event(
+                db,
+                ticket_id=ticket.id,
+                actor_id=current_user.id,
+                event_type=TicketEventType.audio_uploaded,
+                new_value={
+                    "mime_type": stored_audio.mime_type,
+                    "size_bytes": stored_audio.size_bytes,
+                },
+            )
+
+        ticket.transcript = TicketTranscript(
+            raw_text=text,
+            edited_text=text,
+            stt_model="browser-speech-recognition",
+            language="uk-UA",
         )
         await add_ticket_event(
             db,
             ticket_id=ticket.id,
             actor_id=current_user.id,
-            event_type=TicketEventType.audio_uploaded,
-            new_value={"mime_type": stored_audio.mime_type, "size_bytes": stored_audio.size_bytes},
+            event_type=TicketEventType.created,
+            new_value={"status": TicketStatus.draft.value},
         )
-
-    ticket.transcript = TicketTranscript(
-        raw_text=text,
-        edited_text=text,
-        stt_model="browser-speech-recognition",
-        language="uk-UA",
-    )
-    await add_ticket_event(
-        db,
-        ticket_id=ticket.id,
-        actor_id=current_user.id,
-        event_type=TicketEventType.created,
-        new_value={"status": TicketStatus.draft.value},
-    )
-    await add_ticket_event(
-        db,
-        ticket_id=ticket.id,
-        actor_id=current_user.id,
-        event_type=TicketEventType.transcribed,
-        new_value={"stt_model": "browser-speech-recognition", "language": "uk-UA"},
-    )
-    await db.commit()
+        await add_ticket_event(
+            db,
+            ticket_id=ticket.id,
+            actor_id=current_user.id,
+            event_type=TicketEventType.transcribed,
+            new_value={"stt_model": "browser-speech-recognition", "language": "uk-UA"},
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        if stored_audio:
+            delete_audio_file(str(stored_audio.file_path))
+        raise
     loaded = await _get_ticket(db, ticket.id)
-    return DraftTicketResponse(ticket=loaded, transcript_text=text)
+    return DraftTicketResponse(ticket=TicketRead.model_validate(loaded), transcript_text=text)
 
 
 @router.get("/my", response_model=list[TicketListItem])
@@ -224,6 +240,56 @@ async def get_ticket_audio(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket has no audio.")
     path = resolve_audio_path(ticket.audio.file_path)
     return FileResponse(path, media_type=ticket.audio.mime_type, filename=path.name)
+
+
+@router.get("/{ticket_id}/messages/{message_id}/audio")
+async def get_ticket_message_audio(
+    ticket_id: UUID,
+    message_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_profile_ready_user),
+) -> FileResponse:
+    ticket = await _get_ticket(db, ticket_id)
+    _ensure_ticket_view_access(ticket, current_user)
+    message = await _get_ticket_message(db, ticket_id, message_id)
+    if not message.audio_file_path or not message.audio_mime_type:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message has no audio.")
+    path = resolve_audio_path(message.audio_file_path)
+    return FileResponse(path, media_type=message.audio_mime_type, filename=path.name)
+
+
+@router.post("/{ticket_id}/messages/{message_id}/transcribe", response_model=TicketRead)
+async def transcribe_ticket_message(
+    ticket_id: UUID,
+    message_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_profile_ready_user),
+) -> Ticket:
+    ticket = await _get_ticket(db, ticket_id)
+    _ensure_ticket_view_access(ticket, current_user)
+    message = await _get_ticket_message(db, ticket_id, message_id)
+    if not message.audio_file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message has no audio.")
+
+    if not message.transcript_text:
+        transcription = await get_stt_service().transcribe(resolve_audio_path(message.audio_file_path))
+        message.transcript_text = transcription.text
+        message.transcript_model = transcription.model_name
+        message.transcript_language = transcription.language
+        message.audio_duration_seconds = transcription.duration_seconds
+        await add_ticket_event(
+            db,
+            ticket_id=ticket.id,
+            actor_id=current_user.id,
+            event_type=TicketEventType.transcribed,
+            new_value={
+                "message_id": str(message.id),
+                "stt_model": transcription.model_name,
+                "language": transcription.language,
+            },
+        )
+        await db.commit()
+    return await _get_ticket(db, ticket.id)
 
 
 @router.delete("/{ticket_id}", response_model=MessageResponse)

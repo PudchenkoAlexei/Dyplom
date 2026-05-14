@@ -3,12 +3,14 @@
 import { Check, LockKeyhole, Send, Trash2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AudioRecorder, type ReadyRecording } from "@/components/AudioRecorder";
 import { RequesterMeta } from "@/components/RequesterMeta";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth";
 import { priorityLabel } from "@/lib/labels";
 import {
   addOperatorMessage,
+  addOperatorVoiceMessage,
   closeOperatorTicket,
   ticketAudioUrl,
   updateOperatorClassification,
@@ -37,6 +39,9 @@ export function OperatorTicketDetail({
   const [departmentId, setDepartmentId] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [message, setMessage] = useState("");
+  const [voiceResponse, setVoiceResponse] = useState<ReadyRecording | null>(null);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceRecorderVersion, setVoiceRecorderVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -46,6 +51,9 @@ export function OperatorTicketDetail({
     setDepartmentId(ticket.department?.id ?? "");
     setPriority(ticket.priority ?? "medium");
     setMessage("");
+    setVoiceResponse(null);
+    setVoiceTranscript("");
+    setVoiceRecorderVersion((version) => version + 1);
   }, [ticket]);
 
   if (!ticket) {
@@ -88,6 +96,28 @@ export function OperatorTicketDetail({
       await onRefresh(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не вдалося надіслати відповідь.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendVoiceMessage() {
+    if (!ticket || !voiceResponse) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("audio", voiceResponse.blob, voiceResponse.filename ?? "operator-response.webm");
+      if (voiceTranscript.trim().length >= 3) {
+        formData.append("transcript_text", voiceTranscript.trim());
+      }
+      const updated = await addOperatorVoiceMessage(ticket.id, formData);
+      setVoiceResponse(null);
+      setVoiceTranscript("");
+      setVoiceRecorderVersion((version) => version + 1);
+      await onRefresh(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не вдалося надіслати голосову відповідь.");
     } finally {
       setBusy(false);
     }
@@ -217,6 +247,37 @@ export function OperatorTicketDetail({
         <Send size={18} />
         Надіслати відповідь
       </button>
+
+      {canEdit && !isClosed && (
+        <div className="detail-grid">
+          <strong>Голосова відповідь</strong>
+          <AudioRecorder
+            key={voiceRecorderVersion}
+            clearTitle="Очистити аудіовідповідь"
+            onReady={setVoiceResponse}
+            onReset={() => {
+              setVoiceResponse(null);
+              setVoiceTranscript("");
+            }}
+            onTranscriptChange={setVoiceTranscript}
+            recordLabel="Записати відповідь"
+            recordingFilename="operator-response.webm"
+            uploadLabel="Завантажити аудіовідповідь"
+          />
+          {voiceTranscript.trim().length >= 3 && (
+            <div className="info-box">Попередній текст відповіді: {voiceTranscript}</div>
+          )}
+          <button
+            className="primary-button"
+            disabled={!voiceResponse || busy}
+            onClick={sendVoiceMessage}
+            type="button"
+          >
+            <Send size={18} />
+            Надіслати голосом
+          </button>
+        </div>
+      )}
     </section>
   );
 }

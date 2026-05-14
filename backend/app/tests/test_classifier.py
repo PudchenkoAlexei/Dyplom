@@ -5,7 +5,7 @@ from app.services.classifier_prompt import CatalogItem, apply_classifier_chat_te
 
 class DummyTokenizer:
     def __init__(self) -> None:
-        self.kwargs = None
+        self.kwargs: dict[str, object] = {}
 
     def apply_chat_template(self, messages, **kwargs):  # type: ignore[no-untyped-def]
         self.kwargs = kwargs
@@ -53,11 +53,32 @@ def test_classifier_replaces_generated_confidence_with_service_score() -> None:
 
     output = TicketClassifierService._validated_output(
         parsed,
-        {"стипендія", "інше / первинна маршрутизація"},
+        {"стипендія", "інше"},
     )
 
     assert output.category == "стипендія"
     assert output.confidence == TicketClassifierService.DEFAULT_CONFIDENCE
+    assert output.confidence_source == "service_default"
+
+
+def test_classifier_accepts_category_with_description_suffix() -> None:
+    parsed = {"category": "гуртожиток / проживання (Поселення, проживання)", "priority": "medium"}
+
+    output = TicketClassifierService._validated_output(
+        parsed,
+        {"гуртожиток / проживання", "інше"},
+    )
+
+    assert output.category == "гуртожиток / проживання"
+    assert output.confidence_source == "service_default"
+
+
+def test_classifier_accepts_legacy_other_category_name() -> None:
+    parsed = {"category": "інше / первинна маршрутизація", "priority": "low"}
+
+    output = TicketClassifierService._validated_output(parsed, {"стипендія", "інше"})
+
+    assert output.category == "інше"
     assert output.confidence_source == "service_default"
 
 
@@ -66,10 +87,10 @@ def test_classifier_falls_back_for_unknown_category() -> None:
 
     output = TicketClassifierService._validated_output(
         parsed,
-        {"стипендія", "інше / первинна маршрутизація"},
+        {"стипендія", "інше"},
     )
 
-    assert output.category == "інше / первинна маршрутизація"
+    assert output.category == "інше"
     assert output.confidence == TicketClassifierService.FALLBACK_CONFIDENCE
     assert output.confidence_source == "fallback"
     assert output.fallback_reason is not None
@@ -80,11 +101,11 @@ def test_classifier_falls_back_for_invalid_schema() -> None:
 
     output = TicketClassifierService._validated_output(
         parsed,
-        {"стипендія", "інше / первинна маршрутизація"},
+        {"стипендія", "інше"},
         raw_response='{"category":"стипендія","priority":"urgent"}',
     )
 
-    assert output.category == "інше / первинна маршрутизація"
+    assert output.category == "інше"
     assert output.priority.value == "medium"
     assert output.confidence_source == "fallback"
     assert output.raw_response is not None

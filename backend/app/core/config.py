@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal, cast
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,7 +31,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 14
     cookie_secure: bool = False
     cookie_domain: str | None = None
-    cookie_samesite: str = "lax"
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
@@ -55,11 +56,14 @@ class Settings(BaseSettings):
     whisper_model_size: str = "medium"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+    whisper_beam_size: int = Field(default=1, ge=1, le=5)
+    stt_warmup_on_startup: bool = True
 
     llm_base_model: str = "Qwen/Qwen3-1.7B"
     lora_adapter_path: Path = PROJECT_ROOT / "ml/models/qwen3-kpi-lora"
     llm_device: str = "auto"
     classifier_max_new_tokens: int = 128
+    classifier_warmup_on_startup: bool = True
 
     @field_validator("audio_storage_dir", "lora_adapter_path", mode="after")
     @classmethod
@@ -70,11 +74,11 @@ class Settings(BaseSettings):
 
     @field_validator("cookie_samesite", mode="after")
     @classmethod
-    def validate_cookie_samesite(cls, value: str) -> str:
+    def validate_cookie_samesite(cls, value: str) -> Literal["lax", "strict", "none"]:
         normalized = value.lower()
         if normalized not in {"lax", "strict", "none"}:
             raise ValueError("COOKIE_SAMESITE must be one of: lax, strict, none.")
-        return normalized
+        return cast(Literal["lax", "strict", "none"], normalized)
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":

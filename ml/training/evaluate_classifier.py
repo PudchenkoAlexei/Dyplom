@@ -18,6 +18,7 @@ from app.services.classifier_prompt import (  # noqa: E402
     CatalogItem,
     build_classifier_messages,
 )
+from app.services.classifier import TicketClassifierService  # noqa: E402
 
 
 def install_sklearn_stub() -> None:
@@ -36,8 +37,8 @@ def install_sklearn_stub() -> None:
     def roc_curve(*_: object, **__: object) -> None:
         raise RuntimeError("roc_curve is unavailable in the lightweight evaluation runtime.")
 
-    metrics.roc_curve = roc_curve
-    sklearn.metrics = metrics
+    setattr(metrics, "roc_curve", roc_curve)
+    setattr(sklearn, "metrics", metrics)
     sys.modules["sklearn"] = sklearn
     sys.modules["sklearn.metrics"] = metrics
 
@@ -140,6 +141,7 @@ def main() -> None:
     examples = split_examples(read_jsonl(Path(config["dataset_path"])))[args.split]
     category_items = read_catalog_items(Path(config["catalog_path"]))
     category_names = [item.name for item in category_items]
+    allowed_categories = set(category_names)
     tokenizer = AutoTokenizer.from_pretrained(config["base_model"], trust_remote_code=True)
     base_model = AutoModelForCausalLM.from_pretrained(
         config["base_model"],
@@ -176,15 +178,23 @@ def main() -> None:
         raw = tokenizer.decode(generated, skip_special_tokens=True)
         try:
             parsed = extract_json(raw)
+            predicted_category = parsed.get("category", "")
+            predicted_category = (
+                TicketClassifierService._match_allowed_category(
+                    predicted_category,
+                    allowed_categories,
+                )
+                or predicted_category
+            )
             y_category_true.append(example["category"])
-            y_category_pred.append(parsed.get("category", ""))
+            y_category_pred.append(predicted_category)
             y_priority_true.append(example["priority"])
             y_priority_pred.append(parsed.get("priority", ""))
             predictions.append(
                 {
                     "text": example["text"],
                     "expected_category": example["category"],
-                    "predicted_category": parsed.get("category", ""),
+                    "predicted_category": predicted_category,
                     "expected_priority": example["priority"],
                     "predicted_priority": parsed.get("priority", ""),
                     "raw_output": raw,

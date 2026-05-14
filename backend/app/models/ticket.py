@@ -136,6 +136,14 @@ class TicketMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     message: Mapped[str] = mapped_column(Text)
+    audio_file_path: Mapped[str | None] = mapped_column(String(1000))
+    audio_original_filename: Mapped[str | None] = mapped_column(String(255))
+    audio_mime_type: Mapped[str | None] = mapped_column(String(100))
+    audio_size_bytes: Mapped[int | None]
+    audio_duration_seconds: Mapped[float | None] = mapped_column(Float)
+    transcript_text: Mapped[str | None] = mapped_column(Text)
+    transcript_model: Mapped[str | None] = mapped_column(String(120))
+    transcript_language: Mapped[str | None] = mapped_column(String(20))
 
     ticket: Mapped[Ticket] = relationship(back_populates="messages")
     sender: Mapped["User"] = relationship(back_populates="messages")

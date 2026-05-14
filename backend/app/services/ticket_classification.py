@@ -38,11 +38,26 @@ async def classify_submitted_ticket(db: AsyncSession, ticket: Ticket, current_us
         return
 
     departments_by_id = _department_by_id(departments)
+    ticket_text = ticket.edited_text or ""
+    if not ticket_text.strip():
+        await add_ticket_event(
+            db,
+            ticket_id=ticket.id,
+            actor_id=None,
+            event_type=TicketEventType.status_changed,
+            new_value={
+                "classification_status": "failed",
+                "reason": "Ticket has no text to classify.",
+            },
+        )
+        await db.commit()
+        return
+
     try:
         classifier = get_classifier_service()
         classification = classifier.classify(
             role=current_user.role,
-            text=ticket.edited_text,
+            text=ticket_text,
             categories=[_category_catalog_item(item) for item in categories],
         )
     except RuntimeError:
@@ -75,7 +90,11 @@ async def classify_submitted_ticket(db: AsyncSession, ticket: Ticket, current_us
         await db.commit()
         return
 
-    default_department = departments_by_id.get(category.default_department_id)
+    default_department_id = category.default_department_id
+    if default_department_id is None:
+        default_department = None
+    else:
+        default_department = departments_by_id.get(default_department_id)
     if not default_department:
         await add_ticket_event(
             db,

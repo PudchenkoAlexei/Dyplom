@@ -21,7 +21,12 @@ BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.services.classifier_prompt import apply_classifier_chat_template  # noqa: E402
+from app.services.classifier_prompt import (  # noqa: E402
+    CatalogItem,
+    apply_classifier_chat_template,
+    build_classifier_messages,
+)
+from app.services.classifier import TicketClassifierService  # noqa: E402
 
 
 def install_sklearn_stub() -> None:
@@ -36,8 +41,8 @@ def install_sklearn_stub() -> None:
     def roc_curve(*_, **__):
         raise RuntimeError("roc_curve unavailable in smoke runtime.")
 
-    metrics.roc_curve = roc_curve
-    sklearn.metrics = metrics
+    setattr(metrics, "roc_curve", roc_curve)
+    setattr(sklearn, "metrics", metrics)
     sys.modules["sklearn"] = sklearn
     sys.modules["sklearn.metrics"] = metrics
 
@@ -49,7 +54,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: E402
 SMOKE_QUERIES = [
     # (text, expected_category, expected_priority, note)
     ("Чи можу я очікувати додаткову академічну стипендію за наукову роботу?", "стипендія", "medium", "процедура"),
-    ("Як активувати магнітний ключ після переселення в інший корпус гуртожитку?", "гуртожиток / проживання", "medium", "переселення"),
+    ("Я подав заяву на поселення в гуртожиток, але в особистому кабінеті статус не оновлюється кілька днів.", "гуртожиток / проживання", "high", "статус поселення"),
     ("Куди звертатися, якщо в кабінеті вступника зник статус заяви після рекомендацій?", "вступ", "high", "блокуюче"),
     ("Як перенести лабораторну, якщо я був на змаганнях університету?", "навчальний процес", "medium", "перенесення"),
     ("Чи можна оформити заяву в деканаті в електронному вигляді?", "деканат / довідки студентів", "low", "процедурне"),
@@ -63,56 +68,14 @@ SMOKE_QUERIES = [
     ("Куди йти за консультацією щодо посвідки, якщо документи на руках, але прийом відсутній?", "міжнародні студенти", "medium", "посвідка"),
     ("Як отримати екстрений доступ до корпусу під час повітряної тривоги?", "безпека / перепустки", "high", "укриття"),
     ("Чи можливо отримати знижку на оплату навчання за досягнення в науці?", "оплата навчання / фінанси", "low", "знижка"),
-    ("До якого підрозділу подавати пропозицію щодо студентського волонтерства?", "інше / первинна маршрутизація", "low", "ініціатива"),
+    ("До якого підрозділу подавати пропозицію щодо студентського волонтерства?", "інше", "low", "ініціатива"),
 ]
 
-
-def shorten_text(text: str, max_chars: int = 320) -> str:
-    cleaned = " ".join(text.split())
-    return cleaned if len(cleaned) <= max_chars else cleaned[:max_chars].rsplit(" ", 1)[0].strip()
-
-
-def make_category_guide(catalog: dict) -> str:
+def read_catalog_items(catalog: dict) -> list[CatalogItem]:
     descriptions = catalog.get("category_descriptions", {})
-    return "\n".join(
-        f"- {name}: {shorten_text(descriptions.get(name, 'звернення цієї теми'), max_chars=45)}"
-        for name in catalog["categories"]
-    )
-
-
-def routing_hints() -> str:
-    return (
-        "довідки/середній бал/підпис/наказ -> деканат / довідки студентів; "
-        "розклад/сесія/оцінювання/заборгованість до відрахування -> навчальний процес; "
-        "поновлення/переведення/академвідпустка/відрахування -> переведення / поновлення / відрахування; "
-        "оцінки/ролі/курси саме в Електронному кампусі -> Електронний кампус; "
-        "диплом/дублікат/апостиль -> документи про освіту; "
-        "вступна заява/кабінет вступника/підготовчі курси -> вступ; "
-        "посвідка/віза/ДМС іноземця -> міжнародні студенти; "
-        "Wi-Fi/VPN/Moodle/пошта -> мережа / пошта / інтернет; "
-        "Scopus/Web of Science/книги -> бібліотека."
-    )
-
-
-def make_prompt(text: str, role: str, categories: list[str]) -> list[dict]:
     return [
-        {"role": "system", "content": "You are a strict JSON classifier for Ukrainian university helpdesk tickets."},
-        {"role": "user", "content": (
-            "Класифікуй звернення до довідкової системи КПІ. "
-            "Поверни тільки валідний JSON без Markdown з полями category, priority.\n"
-            f"Доступні категорії: {', '.join(categories)}\n"
-            "Обирай категорію за відповідальним підрозділом, а не за випадковим словом у тексті.\n"
-            "Поле category має точно збігатися з однією доступною категорією.\n"
-            "Якщо в тексті згадано кілька тем, обирай категорію того підрозділу, "
-            "який має виконати основну дію або вирішити блокування.\n"
-            "Пріоритети: low, medium, high.\n"
-            "low - довідкове питання без блокування; medium - стандартне робоче звернення; "
-            "high - заблокована дія, втрата доступу, гроші, дедлайн, безпека або ризик відрахування.\n"
-            "Не став medium за замовчуванням: якщо користувач лише питає де/як/коли без блокування - low; "
-            "якщо дія вже не працює, є дедлайн, кошти, доступ, безпека або юридичний ризик - high.\n"
-            f"Роль автора: {role}\n"
-            f"Текст звернення: {shorten_text(text)}"
-        )},
+        CatalogItem(name=name, description=descriptions.get(name, department))
+        for name, department in catalog["categories"].items()
     ]
 
 
@@ -131,7 +94,9 @@ def main() -> None:
 
     config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     catalog = yaml.safe_load(Path(config["catalog_path"]).read_text(encoding="utf-8"))
+    category_items = read_catalog_items(catalog)
     categories = list(catalog["categories"].keys())
+    allowed_categories = set(categories)
 
     print(f"Base model: {config['base_model']}")
     print(f"Adapter:    {config['output_dir']}")
@@ -160,7 +125,7 @@ def main() -> None:
     inference_time = 0.0
 
     for i, (text, expected_cat, expected_prio, note) in enumerate(SMOKE_QUERIES, 1):
-        messages = make_prompt(text, "student", categories)
+        messages = build_classifier_messages(role="student", text=text, categories=category_items)
         prompt = apply_classifier_chat_template(tokenizer, messages, add_generation_prompt=True)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         t1 = time.time()
@@ -179,6 +144,10 @@ def main() -> None:
         try:
             parsed = extract_json(raw)
             pred_cat = parsed.get("category", "")
+            pred_cat = (
+                TicketClassifierService._match_allowed_category(pred_cat, allowed_categories)
+                or pred_cat
+            )
             pred_prio = parsed.get("priority", "")
         except Exception as e:
             print(f"[{i:2d}] PARSE FAIL: {e}")

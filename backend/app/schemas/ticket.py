@@ -32,6 +32,12 @@ class TicketMessageRead(Timestamped):
     id: UUID
     sender_id: UUID
     message: str
+    audio_mime_type: str | None = None
+    audio_size_bytes: int | None = None
+    audio_duration_seconds: float | None = None
+    transcript_text: str | None = None
+    transcript_model: str | None = None
+    transcript_language: str | None = None
 
 
 class TicketEventRead(ORMModel):
@@ -95,7 +101,7 @@ class DraftTicketResponse(BaseModel):
 
 
 class OperatorTicketRead(TicketRead):
-    author: UserRead
+    pass
 
 
 class OperatorTicketPage(BaseModel):

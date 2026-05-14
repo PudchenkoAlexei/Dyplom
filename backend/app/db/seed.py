@@ -1,12 +1,14 @@
 import asyncio
 import os
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.session import AsyncSessionLocal
 from app.models.category import Category
 from app.models.department import Department
 from app.models.enums import UserRole
+from app.models.model import ModelPrediction
+from app.models.ticket import Ticket
 from app.models.user import User
 from app.security.passwords import hash_password
 
@@ -172,11 +174,15 @@ CATEGORIES = [
         "Управління бухгалтерського обліку та звітності",
     ),
     (
-        "інше / первинна маршрутизація",
+        "інше",
         "Змішані, нестандартні або недостатньо визначені звернення: КПІ-стікери, екскурсії, загальні пропозиції, акредитаційні довідки про університет.",
         "Загальна довідкова служба КПІ",
     ),
 ]
+
+CATEGORY_RENAMES = {
+    "інше / первинна маршрутизація": "інше",
+}
 
 
 SEED_USERS = [
@@ -222,6 +228,28 @@ async def seed_catalog() -> None:
     async with AsyncSessionLocal() as db:
         desired_department_names = {item["name"] for item in DEPARTMENTS}
         desired_category_names = {name for name, _, _ in CATEGORIES}
+
+        for old_name, new_name in CATEGORY_RENAMES.items():
+            old_category = await db.scalar(select(Category).where(Category.name == old_name))
+            if not old_category:
+                continue
+
+            new_category = await db.scalar(select(Category).where(Category.name == new_name))
+            await db.execute(
+                update(ModelPrediction)
+                .where(ModelPrediction.category_name == old_name)
+                .values(category_name=new_name)
+            )
+            if new_category:
+                await db.execute(
+                    update(Ticket)
+                    .where(Ticket.category_id == old_category.id)
+                    .values(category_id=new_category.id)
+                )
+                await db.delete(old_category)
+            else:
+                old_category.name = new_name
+            await db.flush()
 
         department_by_name: dict[str, Department] = {}
         for item in DEPARTMENTS:

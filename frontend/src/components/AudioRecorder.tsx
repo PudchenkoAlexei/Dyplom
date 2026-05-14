@@ -3,7 +3,7 @@
 import { Mic, Pause, RotateCcw, Square, Upload } from "lucide-react";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
-interface ReadyRecording {
+export interface ReadyRecording {
   blob: Blob;
   url: string;
   filename?: string;
@@ -78,11 +78,19 @@ export function AudioRecorder({
   onReset,
   onStart,
   onTranscriptChange,
+  recordLabel = "Записати звернення",
+  uploadLabel = "Завантажити аудіо",
+  clearTitle = "Очистити запис",
+  recordingFilename = "voice-ticket.webm",
 }: {
   onReady: (recording: ReadyRecording) => void;
   onReset?: () => void;
   onStart?: () => void;
   onTranscriptChange?: (text: string) => void;
+  recordLabel?: string;
+  uploadLabel?: string;
+  clearTitle?: string;
+  recordingFilename?: string;
 }) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
@@ -191,12 +199,14 @@ export function AudioRecorder({
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
-        onReady({ blob, url, filename: "voice-ticket.webm" });
+        onReady({ blob, url, filename: recordingFilename });
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
       };
       recorder.start();
-      startLiveTranscript();
+      if (onTranscriptChange) {
+        startLiveTranscript();
+      }
       setState("recording");
     } catch (recordingError) {
       setError(microphoneErrorMessage(recordingError));
@@ -214,7 +224,9 @@ export function AudioRecorder({
       setState("paused");
     } else if (state === "paused") {
       recorderRef.current.resume();
-      startLiveTranscript();
+      if (onTranscriptChange) {
+        startLiveTranscript();
+      }
       setState("recording");
     }
   }
@@ -261,7 +273,7 @@ export function AudioRecorder({
         {state === "idle" ? (
           <button className="primary-button" onClick={startRecording} type="button">
             <Mic size={18} />
-            Записати звернення
+            {recordLabel}
           </button>
         ) : (
           <>
@@ -277,7 +289,7 @@ export function AudioRecorder({
         )}
         <label className="secondary-button file-button">
           <Upload size={18} />
-          Завантажити аудіо
+          {uploadLabel}
           <input
             accept="audio/webm,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/ogg,.webm,.wav,.mp3,.m4a,.ogg"
             onChange={handleAudioFile}
@@ -285,7 +297,7 @@ export function AudioRecorder({
           />
         </label>
         {audioUrl && (
-          <button className="icon-button" onClick={resetRecording} title="Очистити запис" type="button">
+          <button className="icon-button" onClick={resetRecording} title={clearTitle} type="button">
             <RotateCcw size={18} />
           </button>
         )}

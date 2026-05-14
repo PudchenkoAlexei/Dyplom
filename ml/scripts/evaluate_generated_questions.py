@@ -21,6 +21,7 @@ from app.services.classifier_prompt import (  # noqa: E402
     apply_classifier_chat_template,
     build_classifier_messages,
 )
+from app.services.classifier import TicketClassifierService  # noqa: E402
 
 
 SIMPLE_QUESTIONS: list[tuple[str, str, str]] = [
@@ -53,7 +54,7 @@ SIMPLE_QUESTIONS: list[tuple[str, str, str]] = [
     ("Куди телефонувати при пожежі в корпусі?", "безпека / перепустки", "high"),
     ("Як отримати платіжне доручення для оплати навчання?", "оплата навчання / фінанси", "medium"),
     ("Чому з моєї картки списали зайві кошти за навчання?", "оплата навчання / фінанси", "high"),
-    ("До якого підрозділу йти з питанням про КПІ-стікери?", "інше / первинна маршрутизація", "low"),
+    ("До якого підрозділу йти з питанням про КПІ-стікери?", "інше", "low"),
 ]
 
 HARD_QUESTIONS_BY_CATEGORY: dict[str, list[tuple[str, str] | tuple[str, str, str]]] = {
@@ -66,7 +67,7 @@ HARD_QUESTIONS_BY_CATEGORY: dict[str, list[tuple[str, str] | tuple[str, str, str
     ],
     "гуртожиток / проживання": [
         ("Чи можна заселитися в гуртожиток до початку навчального року?", "low"),
-        ("Куди писати скаргу на адміністратора гуртожитку?", "high"),
+        ("Я подав заяву на поселення в гуртожиток, але в особистому кабінеті статус не оновлюється кілька днів. Куди звернутися?", "high"),
         ("Доброго дня! Я орендувала кімнату через hostelpay, але адміністратор сказав, що це місце вже зайнято іншим студентом. Як вирішити цей конфлікт і отримати назад оплату?", "high"),
         ("Підкажіть, як офіційно оформити тимчасове проживання батьків у гуртожитку, якщо вони приїхали допомогти мені після операції?", "medium"),
     ],
@@ -153,7 +154,7 @@ HARD_QUESTIONS_BY_CATEGORY: dict[str, list[tuple[str, str] | tuple[str, str, str
         ("Доброго дня! Я перевелася на бюджет з контрактника, але банк продовжує знімати оплату за автоплатежем. Як зупинити списання і повернути вже сплачені кошти?", "high"),
         ("Підкажіть, як змінити графік оплати, якщо я виявив матеріальні труднощі і не можу заплатити одразу всю суму контракту?", "medium"),
     ],
-    "інше / первинна маршрутизація": [
+    "інше": [
         ("Чи можна замовити віртуальну екскурсію в КПІ для школярів?", "low"),
         ("Куди звертатися щодо оренди аудиторії для зовнішнього гуртка школярів?", "low"),
         ("Доброго дня! Я хочу запропонувати ідею для покращення навчальних просторів КПІ. Це не питання навчального процесу. До якого підрозділу подавати пропозицію?", "low"),
@@ -222,6 +223,7 @@ def classify_examples(
     )
     model = PeftModel.from_pretrained(base_model, config["output_dir"])
     model.eval()
+    allowed_categories = {item.name for item in category_items}
 
     results: list[dict] = []
     failures: list[dict] = []
@@ -244,11 +246,19 @@ def classify_examples(
         raw = tokenizer.decode(generated, skip_special_tokens=True)
         try:
             parsed = extract_json(raw)
+            predicted_category = parsed.get("category", "")
+            predicted_category = (
+                TicketClassifierService._match_allowed_category(
+                    predicted_category,
+                    allowed_categories,
+                )
+                or predicted_category
+            )
             results.append(
                 {
                     **example,
                     "index": index,
-                    "predicted_category": parsed.get("category", ""),
+                    "predicted_category": predicted_category,
                     "predicted_priority": parsed.get("priority", ""),
                     "raw_output": raw,
                 }

@@ -81,6 +81,17 @@ async def update_category(
     category = await db.get(Category, category_id)
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found.")
+    existing = await db.scalar(
+        select(Category).where(Category.name == payload.name, Category.id != category_id)
+    )
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Category already exists.")
+    if payload.default_department_id:
+        department = await db.get(Department, payload.default_department_id)
+        if not department:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Department not found."
+            )
     for key, value in payload.model_dump().items():
         setattr(category, key, value)
     await db.commit()

@@ -13,6 +13,10 @@ export function audioUrl(ticketId: string): string {
   return `${API_BASE_URL}/tickets/${ticketId}/audio`;
 }
 
+export function messageAudioUrl(ticketId: string, messageId: string): string {
+  return `${API_BASE_URL}/tickets/${ticketId}/messages/${messageId}/audio`;
+}
+
 type ApiRequestOptions = Omit<RequestInit, "body"> & {
   body?: BodyInit | Record<string, unknown> | unknown[] | null;
   formData?: FormData;

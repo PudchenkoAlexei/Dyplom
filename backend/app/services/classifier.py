@@ -45,8 +45,8 @@ def install_sklearn_stub() -> None:
     def roc_curve(*_: object, **__: object) -> None:
         raise RuntimeError("roc_curve is unavailable in the lightweight classifier runtime.")
 
-    metrics.roc_curve = roc_curve
-    sklearn.metrics = metrics
+    setattr(metrics, "roc_curve", roc_curve)
+    setattr(sklearn, "metrics", metrics)
     sys.modules["sklearn"] = sklearn
     sys.modules["sklearn.metrics"] = metrics
 
@@ -57,7 +57,8 @@ class TicketClassifierService:
     DEFAULT_CONFIDENCE = SERVICE_CONFIDENCE_SCORE
     FALLBACK_CONFIDENCE = FALLBACK_CONFIDENCE_SCORE
     FALLBACK_PRIORITY = Priority.medium
-    FALLBACK_CATEGORY = "інше / первинна маршрутизація"
+    FALLBACK_CATEGORY = "інше"
+    CATEGORY_ALIASES = {"інше / первинна маршрутизація": FALLBACK_CATEGORY}
 
     def __init__(self) -> None:
         adapter_path = Path(settings.lora_adapter_path)
@@ -147,6 +148,31 @@ class TicketClassifierService:
             raise RuntimeError(f"Classifier did not return JSON: {raw}")
         return json.loads(stripped[start : end + 1])
 
+    @staticmethod
+    def _normalize_category_name(value: str) -> str:
+        return " ".join(value.casefold().split())
+
+    @classmethod
+    def _match_allowed_category(cls, category: str, allowed_categories: set[str]) -> str | None:
+        normalized = cls._normalize_category_name(category)
+        normalized_allowed = {
+            cls._normalize_category_name(allowed): allowed for allowed in allowed_categories
+        }
+        if normalized in normalized_allowed:
+            return normalized_allowed[normalized]
+        for alias, target in cls.CATEGORY_ALIASES.items():
+            if normalized == cls._normalize_category_name(alias):
+                return normalized_allowed.get(cls._normalize_category_name(target))
+
+        category_without_description = category.split("(", 1)[0].strip(" \t\r\n-–—:;,.")
+        normalized_without_description = cls._normalize_category_name(category_without_description)
+        if normalized_without_description in normalized_allowed:
+            return normalized_allowed[normalized_without_description]
+        for alias, target in cls.CATEGORY_ALIASES.items():
+            if normalized_without_description == cls._normalize_category_name(alias):
+                return normalized_allowed.get(cls._normalize_category_name(target))
+        return None
+
     @classmethod
     def _validated_output(
         cls,
@@ -172,7 +198,9 @@ class TicketClassifierService:
                 reason=f"Classifier returned invalid schema: {exc}",
             )
 
-        if output.category in allowed_categories:
+        matched_category = cls._match_allowed_category(output.category, allowed_categories)
+        if matched_category:
+            output.category = matched_category
             return output
 
         return cls._fallback_output(

@@ -485,7 +485,31 @@ a {
   background: #f7faf8;
   border: 1px solid var(--line);
   border-radius: 8px;
+  display: grid;
+  gap: 10px;
   padding: 12px;
+}
+
+.message-item p {
+  margin: 0;
+}
+
+.message-audio-block {
+  display: grid;
+  gap: 10px;
+}
+
+.message-audio-block .secondary-button {
+  justify-self: start;
+}
+
+.message-transcript {
+  background: #fff;
+  border-left: 3px solid var(--primary);
+  border-radius: 0 8px 8px 0;
+  color: var(--ink);
+  line-height: 1.5;
+  padding: 10px 12px;
 }
 
 .error-box {
@@ -547,7 +571,41 @@ a {
   align-items: center;
   display: flex;
   gap: 10px;
-  justify-content: space-between;
+  justify-content: center;
+}
+
+.pagination-pages {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.pagination-page {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: inline-flex;
+  font-weight: 700;
+  height: 38px;
+  justify-content: center;
+  min-width: 38px;
+  padding: 0 10px;
+}
+
+.pagination-page.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+}
+
+.pagination-ellipsis {
+  color: var(--muted);
+  min-width: 20px;
+  text-align: center;
 }
 
 .spin {
@@ -588,12 +646,17 @@ a {
   .section-title > .primary-button,
   .section-title > .secondary-button,
   .section-title > .danger-button,
-  .filters-toolbar {
+  .filters-toolbar,
+  .pagination-bar {
     width: 100%;
   }
 
   .filters-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .pagination-bar {
+    flex-wrap: wrap;
   }
 
   .meta-grid {

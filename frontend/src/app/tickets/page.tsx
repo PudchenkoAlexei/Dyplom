@@ -2,12 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Send } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { AuthGuard } from "@/components/AuthGuard";
 import { EmptyState, ErrorState, LoadingState } from "@/components/FeedbackState";
+import { Pagination } from "@/components/Pagination";
 import { ProfileRequired } from "@/components/ProfileRequired";
 import { RequesterTicketDetail } from "@/components/RequesterTicketDetail";
 import { PriorityBadge, StatusBadge } from "@/components/StatusBadge";
@@ -23,6 +24,8 @@ import {
   type DraftTicketResponse,
 } from "@/lib/ticketsApi";
 import type { Ticket } from "@/types/domain";
+
+const PAGE_SIZE = 6;
 
 function makeClientRequestId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -51,6 +54,7 @@ function RequesterWorkspace() {
   const [liveTranscript, setLiveTranscript] = useState("");
   const [recorderVersion, setRecorderVersion] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const clientRequestIdRef = useRef(makeClientRequestId());
@@ -82,6 +86,20 @@ function RequesterWorkspace() {
   });
 
   const tickets = ticketsQuery.data ?? [];
+  const totalTickets = tickets.length;
+  const totalPages = Math.ceil(totalTickets / PAGE_SIZE);
+  const currentPageTickets = tickets.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  useEffect(() => {
+    if (totalPages === 0) {
+      setCurrentPage(1);
+      return;
+    }
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   function handleRecordingReady(nextRecording: { blob: Blob; url: string; filename?: string }) {
     setRecording(nextRecording);
   }
@@ -130,6 +148,7 @@ function RequesterWorkspace() {
       setRecording(null);
       setSelectedTicket(submitted);
       setRecorderVersion((version) => version + 1);
+      setCurrentPage(1);
       clientRequestIdRef.current = makeClientRequestId();
       await queryClient.invalidateQueries({ queryKey: ["myTickets"] });
     } catch (err) {
@@ -157,6 +176,11 @@ function RequesterWorkspace() {
     if (!window.confirm("Видалити цю заявку?")) return;
     setActionError(null);
     await deleteMutation.mutateAsync(ticketId);
+  }
+
+  async function refreshSelectedTicket(ticket: Ticket) {
+    setSelectedTicket(ticket);
+    await queryClient.invalidateQueries({ queryKey: ["myTickets"] });
   }
 
   return (
@@ -226,6 +250,11 @@ function RequesterWorkspace() {
           <section className="panel">
             <div className="panel-header">
               <h2>Історія</h2>
+              {totalTickets > 0 && (
+                <span className="muted small">
+                  {(currentPage - 1) * PAGE_SIZE + 1}-{Math.min(currentPage * PAGE_SIZE, totalTickets)} з {totalTickets}
+                </span>
+              )}
             </div>
             {ticketsQuery.isLoading ? (
               <LoadingState message="Завантажуємо ваші заявки..." />
@@ -234,7 +263,7 @@ function RequesterWorkspace() {
             ) : (
               <div className="ticket-list">
                 {tickets.length === 0 && <EmptyState message="Заявок поки немає." />}
-                {tickets.map((ticket) => (
+                {currentPageTickets.map((ticket) => (
                   <button
                     className={selectedTicket?.id === ticket.id ? "ticket-row active" : "ticket-row"}
                     disabled={detailLoading}
@@ -246,7 +275,7 @@ function RequesterWorkspace() {
                       <span className="ticket-title">
                         {ticket.title ?? ticket.edited_text ?? ticket.id}
                       </span>
-                      <StatusBadge status={ticket.status} />
+                      {ticket.status !== "classified" && <StatusBadge status={ticket.status} />}
                     </div>
                     <div className="toolbar">
                       <PriorityBadge priority={ticket.priority} />
@@ -256,6 +285,13 @@ function RequesterWorkspace() {
                     </div>
                   </button>
                 ))}
+                <Pagination
+                  currentPage={currentPage}
+                  disabled={ticketsQuery.isFetching || detailLoading}
+                  onPageChange={setCurrentPage}
+                  pageSize={PAGE_SIZE}
+                  total={totalTickets}
+                />
               </div>
             )}
           </section>
@@ -267,6 +303,7 @@ function RequesterWorkspace() {
           busy={deleteMutation.isPending || detailLoading}
           currentUser={user}
           onDelete={deleteTicket}
+          onRefresh={refreshSelectedTicket}
           ticket={selectedTicket}
         />
       )}

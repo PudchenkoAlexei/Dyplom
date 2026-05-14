@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import overload
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -13,10 +14,10 @@ from app.models.category import Category
 from app.models.department import Department
 from app.models.enums import UserRole
 from app.models.model import ModelVersion
-from app.models.ticket import Ticket
+from app.models.ticket import Ticket, TicketMessage
 from app.models.user import User
-from app.schemas.ticket import DraftTicketResponse
-from app.services.classifier import CatalogItem
+from app.schemas.ticket import DraftTicketResponse, TicketRead
+from app.services.classifier_prompt import CatalogItem
 from app.services.storage import delete_audio_file
 
 settings = get_settings()
@@ -95,6 +96,18 @@ async def _get_ticket(db: AsyncSession, ticket_id: UUID, include_author: bool = 
     return ticket
 
 
+async def _get_ticket_message(db: AsyncSession, ticket_id: UUID, message_id: UUID) -> TicketMessage:
+    message = await db.scalar(
+        select(TicketMessage).where(
+            TicketMessage.id == message_id,
+            TicketMessage.ticket_id == ticket_id,
+        )
+    )
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found.")
+    return message
+
+
 def _ensure_ticket_view_access(ticket: Ticket, user: User) -> None:
     if user.role in {UserRole.operator, UserRole.admin}:
         return
@@ -116,7 +129,18 @@ def _normalize_name(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def _find_by_name(items: list[Category] | list[Department], name: str):
+@overload
+def _find_by_name(items: list[Category], name: str) -> Category | None: ...
+
+
+@overload
+def _find_by_name(items: list[Department], name: str) -> Department | None: ...
+
+
+def _find_by_name(
+    items: list[Category] | list[Department],
+    name: str,
+) -> Category | Department | None:
     normalized = _normalize_name(name)
     for item in items:
         if _normalize_name(item.name) == normalized:
@@ -124,7 +148,7 @@ def _find_by_name(items: list[Category] | list[Department], name: str):
     return None
 
 
-def _department_by_id(departments: list[Department]) -> dict:
+def _department_by_id(departments: list[Department]) -> dict[UUID, Department]:
     return {department.id: department for department in departments}
 
 
@@ -179,7 +203,10 @@ async def _existing_draft_response(
     ticket = await _get_ticket_by_client_request_id(db, author_id, client_request_id)
     if not ticket:
         return None
-    return DraftTicketResponse(ticket=ticket, transcript_text=_ticket_transcript_text(ticket))
+    return DraftTicketResponse(
+        ticket=TicketRead.model_validate(ticket),
+        transcript_text=_ticket_transcript_text(ticket),
+    )
 
 
 async def _get_model_version(db: AsyncSession) -> ModelVersion:
@@ -212,7 +239,12 @@ async def _get_model_version(db: AsyncSession) -> ModelVersion:
 
 async def _delete_ticket_with_audio(db: AsyncSession, ticket: Ticket) -> None:
     audio_path = ticket.audio.file_path if ticket.audio else None
+    message_audio_paths = [
+        message.audio_file_path for message in ticket.messages if message.audio_file_path
+    ]
     await db.delete(ticket)
     await db.commit()
     if audio_path:
         delete_audio_file(audio_path)
+    for message_audio_path in message_audio_paths:
+        delete_audio_file(message_audio_path)

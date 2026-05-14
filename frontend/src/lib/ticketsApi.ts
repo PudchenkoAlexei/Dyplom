@@ -1,4 +1,4 @@
-import { apiRequest, audioUrl } from "@/lib/api";
+import { apiRequest, audioUrl, messageAudioUrl } from "@/lib/api";
 import type {
   Category,
   Department,
@@ -16,12 +16,18 @@ export interface DraftTicketResponse {
 export interface OperatorTicketFilters {
   statusFilter?: TicketStatus | "";
   assignedToMe?: "" | "true" | "false";
+  categoryId?: string;
+  sortBy?: "created_desc" | "category";
   limit?: number;
   offset?: number;
 }
 
 export function ticketAudioUrl(ticketId: string): string {
   return audioUrl(ticketId);
+}
+
+export function ticketMessageAudioUrl(ticketId: string, messageId: string): string {
+  return messageAudioUrl(ticketId, messageId);
 }
 
 export async function createDraftFromAudio(formData: FormData): Promise<DraftTicketResponse> {
@@ -67,12 +73,16 @@ export async function listDepartments(): Promise<Department[]> {
 export async function listOperatorTickets({
   statusFilter,
   assignedToMe,
+  categoryId,
+  sortBy = "created_desc",
   limit = 20,
   offset = 0,
 }: OperatorTicketFilters): Promise<OperatorTicketPage> {
   const params = new URLSearchParams();
   if (statusFilter) params.set("status_filter", statusFilter);
   if (assignedToMe) params.set("assigned_to_me", assignedToMe);
+  if (categoryId) params.set("category_id", categoryId);
+  params.set("sort_by", sortBy);
   params.set("limit", String(limit));
   params.set("offset", String(offset));
   const suffix = params.toString() ? `?${params}` : "";
@@ -109,6 +119,19 @@ export async function addOperatorMessage(ticketId: string, message: string): Pro
   return apiRequest<Ticket>(`/operator/tickets/${ticketId}/messages`, {
     method: "POST",
     body: { message },
+  });
+}
+
+export async function addOperatorVoiceMessage(ticketId: string, formData: FormData): Promise<Ticket> {
+  return apiRequest<Ticket>(`/operator/tickets/${ticketId}/voice-message`, {
+    method: "POST",
+    formData,
+  });
+}
+
+export async function transcribeTicketMessage(ticketId: string, messageId: string): Promise<Ticket> {
+  return apiRequest<Ticket>(`/tickets/${ticketId}/messages/${messageId}/transcribe`, {
+    method: "POST",
   });
 }
 

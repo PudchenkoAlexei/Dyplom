@@ -1,3 +1,7 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -7,8 +11,46 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1 import auth, catalog, tickets, users
 from app.core.config import get_settings
+from app.services.classifier import get_classifier_service
+from app.services.stt import get_stt_service
 
 settings = get_settings()
+logger = logging.getLogger("uvicorn.error")
+
+
+def warm_up_classifier() -> None:
+    if not settings.classifier_warmup_on_startup:
+        logger.info("Classifier warmup is disabled.")
+        return
+
+    started_at = time.perf_counter()
+    logger.info("Warming up classifier model...")
+    get_classifier_service()
+    logger.info(
+        "Classifier model warmed up in %.2f seconds.",
+        time.perf_counter() - started_at,
+    )
+
+
+def warm_up_stt() -> None:
+    if not settings.stt_warmup_on_startup:
+        logger.info("STT warmup is disabled.")
+        return
+
+    started_at = time.perf_counter()
+    logger.info("Warming up speech-to-text model...")
+    get_stt_service()
+    logger.info(
+        "Speech-to-text model warmed up in %.2f seconds.",
+        time.perf_counter() - started_at,
+    )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    warm_up_classifier()
+    warm_up_stt()
+    yield
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -30,7 +72,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=settings.app_name)
+    app = FastAPI(title=settings.app_name, lifespan=lifespan)
     if settings.allowed_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     if settings.security_headers_enabled:

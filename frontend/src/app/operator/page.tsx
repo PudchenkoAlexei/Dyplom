@@ -8,9 +8,10 @@ import { AppShell } from "@/components/AppShell";
 import { AuthGuard } from "@/components/AuthGuard";
 import { EmptyState, ErrorState, LoadingState } from "@/components/FeedbackState";
 import { OperatorTicketDetail } from "@/components/OperatorTicketDetail";
+import { Pagination } from "@/components/Pagination";
 import { ProfileRequired } from "@/components/ProfileRequired";
 import { requesterSummary } from "@/components/RequesterMeta";
-import { PriorityBadge, StatusBadge } from "@/components/StatusBadge";
+import { PriorityBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth";
 import { isProfileComplete, profileIssues } from "@/lib/profile";
 import {
@@ -23,12 +24,10 @@ import {
 } from "@/lib/ticketsApi";
 import type { Ticket, TicketStatus } from "@/types/domain";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 6;
 
 const statuses: Array<{ value: TicketStatus | ""; label: string }> = [
   { value: "", label: "Усі" },
-  { value: "submitted", label: "Надіслані" },
-  { value: "classified", label: "Нові" },
   { value: "in_progress", label: "В обробці" },
   { value: "answered", label: "З відповіддю" },
   { value: "closed", label: "Закриті" },
@@ -50,6 +49,8 @@ function OperatorWorkspace() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
   const [assignedToMe, setAssignedToMe] = useState<"" | "true" | "false">("");
+  const [categoryId, setCategoryId] = useState("");
+  const [sortBy, setSortBy] = useState<"created_desc" | "category">("created_desc");
   const [offset, setOffset] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -57,8 +58,15 @@ function OperatorWorkspace() {
   const issues = profileIssues(user);
 
   const ticketsQuery = useQuery({
-    queryKey: ["operatorTickets", statusFilter, assignedToMe, offset],
-    queryFn: () => listOperatorTickets({ statusFilter, assignedToMe, limit: PAGE_SIZE, offset }),
+    queryKey: ["operatorTickets", statusFilter, assignedToMe, categoryId, sortBy, offset],
+    queryFn: () => listOperatorTickets({
+      statusFilter,
+      assignedToMe,
+      categoryId,
+      sortBy,
+      limit: PAGE_SIZE,
+      offset,
+    }),
     enabled: profileComplete,
   });
 
@@ -96,16 +104,20 @@ function OperatorWorkspace() {
   useEffect(() => {
     setOffset(0);
     setSelectedTicket(null);
-  }, [statusFilter, assignedToMe]);
+  }, [statusFilter, assignedToMe, categoryId, sortBy]);
 
   const ticketsPage = ticketsQuery.data;
   const tickets = ticketsPage?.items ?? [];
   const total = ticketsPage?.total ?? 0;
   const limit = ticketsPage?.limit ?? PAGE_SIZE;
+  const currentPage = Math.floor(offset / limit) + 1;
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + limit, total);
-  const hasPreviousPage = offset > 0;
-  const hasNextPage = offset + limit < total;
+
+  useEffect(() => {
+    if (!ticketsPage || total === 0 || offset < total) return;
+    setOffset(Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE);
+  }, [offset, ticketsPage, total]);
 
   async function refreshQueue() {
     await ticketsQuery.refetch();
@@ -146,6 +158,18 @@ function OperatorWorkspace() {
 
   function changeAssignedFilter(value: "" | "true" | "false") {
     setAssignedToMe(value);
+  }
+
+  function changeCategoryFilter(value: string) {
+    setCategoryId(value);
+  }
+
+  function changeSort(value: "created_desc" | "category") {
+    setSortBy(value);
+  }
+
+  function changePage(page: number) {
+    setOffset((page - 1) * PAGE_SIZE);
   }
 
   return (
@@ -195,6 +219,27 @@ function OperatorWorkspace() {
               <option value="true">Мої заявки</option>
               <option value="false">Вільні заявки</option>
             </select>
+            <select
+              className="search-input"
+              disabled={catalogQuery.isLoading}
+              onChange={(event) => changeCategoryFilter(event.target.value)}
+              value={categoryId}
+            >
+              <option value="">Усі категорії</option>
+              {catalogQuery.data?.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <select
+              className="search-input"
+              onChange={(event) => changeSort(event.target.value as "created_desc" | "category")}
+              value={sortBy}
+            >
+              <option value="created_desc">За датою створення</option>
+              <option value="category">За категорією</option>
+            </select>
           </div>
 
           <div className="grid-two">
@@ -230,11 +275,13 @@ function OperatorWorkspace() {
                           <span className="ticket-title">
                             {ticket.title ?? ticket.edited_text ?? ticket.id}
                           </span>
-                          <StatusBadge status={ticket.status} />
                         </div>
                         <div className="toolbar">
                           <PriorityBadge priority={ticket.priority} />
                           <span className="muted small">{requesterSummary(ticket.author)}</span>
+                          <span className="muted small">
+                            {new Date(ticket.created_at).toLocaleString("uk-UA")}
+                          </span>
                           <span className="muted small">
                             {ticket.category?.name ?? "Без категорії"}
                           </span>
@@ -243,29 +290,13 @@ function OperatorWorkspace() {
                     ))}
                   </div>
 
-                  {total > limit && (
-                    <div className="pagination-bar">
-                      <button
-                        className="secondary-button"
-                        disabled={!hasPreviousPage}
-                        onClick={() => setOffset(Math.max(0, offset - limit))}
-                        type="button"
-                      >
-                        Назад
-                      </button>
-                      <span className="muted small">
-                        {pageStart}-{pageEnd} з {total}
-                      </span>
-                      <button
-                        className="secondary-button"
-                        disabled={!hasNextPage}
-                        onClick={() => setOffset(offset + limit)}
-                        type="button"
-                      >
-                        Далі
-                      </button>
-                    </div>
-                  )}
+                  <Pagination
+                    currentPage={currentPage}
+                    disabled={ticketsQuery.isFetching}
+                    onPageChange={changePage}
+                    pageSize={PAGE_SIZE}
+                    total={total}
+                  />
                 </>
               )}
             </section>

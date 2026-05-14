@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 SYSTEM_PROMPT = "You are a strict JSON classifier for Ukrainian university helpdesk tickets."
 
@@ -42,7 +43,7 @@ def category_description(item: CategoryItem) -> str | None:
     return description.strip() if description else None
 
 
-def category_guide(category_items: list[CategoryItem]) -> str:
+def category_guide(category_items: Sequence[CategoryItem]) -> str:
     parts = []
     for item in category_items:
         name = category_name(item)
@@ -109,7 +110,7 @@ def build_classifier_prompt(
     *,
     role: Enum | str,
     text: str,
-    categories: list[CategoryItem],
+    categories: Sequence[CategoryItem],
 ) -> str:
     ticket_text = shorten_text(text, max_chars=320)
     return (
@@ -134,7 +135,7 @@ def build_classifier_messages(
     *,
     role: Enum | str,
     text: str,
-    categories: list[CategoryItem],
+    categories: Sequence[CategoryItem],
     assistant_response: str | None = None,
 ) -> list[dict[str, str]]:
     messages = [
