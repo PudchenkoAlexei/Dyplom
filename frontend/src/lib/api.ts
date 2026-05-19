@@ -108,3 +108,49 @@ export async function apiRequest<T>(
   }
   return (await response.json()) as T;
 }
+
+export async function apiBlobRequest(
+  path: string,
+  options: ApiRequestOptions = {},
+  retryOnUnauthorized = true,
+): Promise<Blob> {
+  const headers = new Headers(options.headers);
+  let body = options.body;
+  if (options.formData) {
+    body = options.formData;
+  } else if (isJsonBody(body)) {
+    headers.set("Content-Type", "application/json");
+    body = JSON.stringify(body);
+  } else if (typeof body === "string") {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers,
+    body,
+    credentials: "include",
+  });
+
+  if (response.status === 401 && retryOnUnauthorized && canRefreshAfterUnauthorized(path)) {
+    try {
+      await apiRequest<unknown>("/auth/refresh", { method: "POST" }, false);
+      return await apiBlobRequest(path, options, false);
+    } catch {
+      // Keep the original 401 response as the visible error.
+    }
+  }
+
+  if (!response.ok) {
+    let message = response.statusText;
+    try {
+      const data = (await response.json()) as { detail?: unknown };
+      message = formatApiDetail(data.detail, message);
+    } catch {
+      // Response is not JSON.
+    }
+    throw new ApiError(response.status, message);
+  }
+
+  return await response.blob();
+}

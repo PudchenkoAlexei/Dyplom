@@ -33,10 +33,7 @@ export default function LoginPage() {
     <main className="auth-page">
       <section className="auth-aside">
         <h1>KPI Voice Helpdesk</h1>
-        <p>
-          Система приймає голосові звернення студентів і викладачів, перетворює їх на
-          текст, класифікує мовною моделлю та передає в операторську чергу.
-        </p>
+        <p>Система приймає голосові звернення студентів і викладачів.</p>
       </section>
       <section className="auth-form-wrap">
         <form className="auth-form" onSubmit={handleSubmit}>
@@ -74,4 +71,3 @@ export default function LoginPage() {
     </main>
   );
 }
-

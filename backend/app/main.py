@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.api.v1 import auth, catalog, tickets, users
+from app.api.v1 import auth, catalog, tickets, users, voice_assistant
 from app.core.config import get_settings
 from app.services.classifier import get_classifier_service
 from app.services.stt import get_stt_service
@@ -96,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(catalog.router, prefix=settings.api_prefix)
     app.include_router(tickets.router, prefix=settings.api_prefix)
     app.include_router(tickets.operator_router, prefix=settings.api_prefix)
+    app.include_router(voice_assistant.router, prefix=settings.api_prefix)
     return app
 
 

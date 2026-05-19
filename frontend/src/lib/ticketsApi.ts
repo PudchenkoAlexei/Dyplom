@@ -1,4 +1,4 @@
-import { apiRequest, audioUrl, messageAudioUrl } from "@/lib/api";
+import { apiBlobRequest, apiRequest, audioUrl, messageAudioUrl } from "@/lib/api";
 import type {
   Category,
   Department,
@@ -11,6 +11,23 @@ import type {
 export interface DraftTicketResponse {
   ticket: Ticket;
   transcript_text: string;
+}
+
+export interface VoiceAssistantSource {
+  title: string;
+  url: string;
+  score: number;
+}
+
+export interface VoiceAssistantResponse {
+  question_text: string;
+  answer_text: string;
+  confidence: number;
+  source: "llm" | "knowledge_base" | "fallback" | string;
+  sources: VoiceAssistantSource[];
+  can_create_ticket: boolean;
+  used_llm: boolean;
+  model_name: string | null;
 }
 
 export interface OperatorTicketFilters {
@@ -137,4 +154,18 @@ export async function transcribeTicketMessage(ticketId: string, messageId: strin
 
 export async function closeOperatorTicket(ticketId: string): Promise<Ticket> {
   return apiRequest<Ticket>(`/operator/tickets/${ticketId}/close`, { method: "POST" });
+}
+
+export async function askVoiceAssistant(formData: FormData): Promise<VoiceAssistantResponse> {
+  return apiRequest<VoiceAssistantResponse>("/voice-assistant/ask", {
+    method: "POST",
+    formData,
+  });
+}
+
+export async function synthesizeVoiceAssistantSpeech(text: string): Promise<Blob> {
+  return apiBlobRequest("/voice-assistant/speech", {
+    method: "POST",
+    body: { text },
+  });
 }

@@ -76,8 +76,11 @@ function recorderOptions(): MediaRecorderOptions | undefined {
 export function AudioRecorder({
   onReady,
   onReset,
+  onAutoStop,
   onStart,
   onTranscriptChange,
+  autoStopAfterTranscriptSilenceMs,
+  hideUpload = false,
   recordLabel = "Записати звернення",
   uploadLabel = "Завантажити аудіо",
   clearTitle = "Очистити запис",
@@ -85,8 +88,11 @@ export function AudioRecorder({
 }: {
   onReady: (recording: ReadyRecording) => void;
   onReset?: () => void;
+  onAutoStop?: () => void;
   onStart?: () => void;
   onTranscriptChange?: (text: string) => void;
+  autoStopAfterTranscriptSilenceMs?: number;
+  hideUpload?: boolean;
   recordLabel?: string;
   uploadLabel?: string;
   clearTitle?: string;
@@ -96,6 +102,9 @@ export function AudioRecorder({
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const autoStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heardTranscriptRef = useRef(false);
+  const stateRef = useRef<"idle" | "recording" | "paused">("idle");
   const [state, setState] = useState<"idle" | "recording" | "paused">("idle");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,13 +114,40 @@ export function AudioRecorder({
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       speechRecognitionRef.current?.abort();
       speechRecognitionRef.current = null;
+      clearAutoStopTimer();
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };
   }, [audioUrl]);
 
+  function setRecorderState(nextState: "idle" | "recording" | "paused") {
+    stateRef.current = nextState;
+    setState(nextState);
+  }
+
+  function clearAutoStopTimer() {
+    if (autoStopTimerRef.current) {
+      clearTimeout(autoStopTimerRef.current);
+      autoStopTimerRef.current = null;
+    }
+  }
+
+  function scheduleAutoStopAfterSilence(text: string) {
+    if (!autoStopAfterTranscriptSilenceMs) return;
+    if (text.trim().length < 3) return;
+
+    heardTranscriptRef.current = true;
+    clearAutoStopTimer();
+    autoStopTimerRef.current = setTimeout(() => {
+      if (stateRef.current !== "recording" || !heardTranscriptRef.current) return;
+      onAutoStop?.();
+      stopRecording();
+    }, autoStopAfterTranscriptSilenceMs);
+  }
+
   function updateLiveTranscript(text: string) {
     onTranscriptChange?.(text);
+    scheduleAutoStopAfterSilence(text);
   }
 
   function createSpeechRecognition(): BrowserSpeechRecognition | null {
@@ -172,6 +208,8 @@ export function AudioRecorder({
 
   async function startRecording() {
     setError(null);
+    clearAutoStopTimer();
+    heardTranscriptRef.current = false;
     onStart?.();
     updateLiveTranscript("");
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -193,7 +231,7 @@ export function AudioRecorder({
         stopLiveTranscript();
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
-        setState("idle");
+        setRecorderState("idle");
       };
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
@@ -207,38 +245,42 @@ export function AudioRecorder({
       if (onTranscriptChange) {
         startLiveTranscript();
       }
-      setState("recording");
+      setRecorderState("recording");
     } catch (recordingError) {
       setError(microphoneErrorMessage(recordingError));
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
-      setState("idle");
+      setRecorderState("idle");
     }
   }
 
   function pauseRecording() {
     if (!recorderRef.current) return;
     if (state === "recording") {
+      clearAutoStopTimer();
       recorderRef.current.pause();
       stopLiveTranscript();
-      setState("paused");
+      setRecorderState("paused");
     } else if (state === "paused") {
       recorderRef.current.resume();
       if (onTranscriptChange) {
         startLiveTranscript();
       }
-      setState("recording");
+      setRecorderState("recording");
     }
   }
 
   function stopRecording() {
+    clearAutoStopTimer();
     stopLiveTranscript();
     recorderRef.current?.stop();
-    setState("idle");
+    setRecorderState("idle");
   }
 
   function resetRecording() {
     if (audioUrl) URL.revokeObjectURL(audioUrl);
+    clearAutoStopTimer();
+    heardTranscriptRef.current = false;
     speechRecognitionRef.current?.abort();
     speechRecognitionRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -248,6 +290,7 @@ export function AudioRecorder({
     setError(null);
     recorderRef.current = null;
     chunksRef.current = [];
+    setRecorderState("idle");
     onReset?.();
   }
 
@@ -287,15 +330,17 @@ export function AudioRecorder({
             </button>
           </>
         )}
-        <label className="secondary-button file-button">
-          <Upload size={18} />
-          {uploadLabel}
-          <input
-            accept="audio/webm,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/ogg,.webm,.wav,.mp3,.m4a,.ogg"
-            onChange={handleAudioFile}
-            type="file"
-          />
-        </label>
+        {!hideUpload && (
+          <label className="secondary-button file-button">
+            <Upload size={18} />
+            {uploadLabel}
+            <input
+              accept="audio/webm,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/ogg,.webm,.wav,.mp3,.m4a,.ogg"
+              onChange={handleAudioFile}
+              type="file"
+            />
+          </label>
+        )}
         {audioUrl && (
           <button className="icon-button" onClick={resetRecording} title={clearTitle} type="button">
             <RotateCcw size={18} />

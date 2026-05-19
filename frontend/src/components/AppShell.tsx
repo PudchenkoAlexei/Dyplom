@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, LogOut, ShieldCheck, Ticket, UserRound } from "lucide-react";
+import { ClipboardList, Headphones, LogOut, ShieldCheck, Ticket, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { roleLabel } from "@/lib/labels";
 
 const navItems = [
+  { href: "/assistant", label: "Довідкова", icon: Headphones, roles: ["student", "teacher"] },
   { href: "/tickets", label: "Мої заявки", icon: Ticket, roles: ["student", "teacher"] },
   { href: "/operator", label: "Черга заявок", icon: ClipboardList, roles: ["operator", "admin"] },
   { href: "/profile", label: "Профіль", icon: UserRound, roles: ["student", "teacher", "operator", "admin"] },

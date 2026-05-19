@@ -512,6 +512,54 @@ a {
   padding: 10px 12px;
 }
 
+.call-state {
+  align-items: center;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.assistant-answer {
+  background: #f7faf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  line-height: 1.6;
+  padding: 14px;
+}
+
+.assistant-answer p {
+  margin: 0;
+}
+
+.source-list {
+  display: grid;
+  gap: 8px;
+}
+
+.source-list a {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--blue);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 10px 12px;
+}
+
+.source-list span {
+  overflow-wrap: anywhere;
+}
+
 .error-box {
   background: #fff1f0;
   border: 1px solid #f2beb9;
