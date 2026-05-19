@@ -7,8 +7,25 @@ def test_knowledge_base_finds_student_reference() -> None:
     matches = service.search("Як отримати довідку про навчання?")
 
     assert matches
-    assert matches[0].entry.id == "student-reference"
+    assert matches[0].entry.source_url == "https://kpi.ua/reference"
     assert matches[0].score > 0
+
+
+def test_knowledge_base_finds_generated_faq_topics() -> None:
+    service = KnowledgeBaseService()
+
+    cases = [
+        ("Які документи потрібні для переведення в КПІ?", "https://kpi.ua/gbook"),
+        ("Що робити якщо мене не допускають до сесії?", "https://kpi.ua/faq-session"),
+        ("Як перевестися на бюджет?", "https://kpi.ua/perevod"),
+        ("Який телефон бухгалтерії?", "https://kpi.ua/accounting-phone"),
+    ]
+
+    for question, expected_url in cases:
+        matches = service.search(question)
+
+        assert matches
+        assert matches[0].entry.source_url == expected_url
 
 
 def test_voice_assistant_falls_back_for_unknown_question(monkeypatch) -> None:

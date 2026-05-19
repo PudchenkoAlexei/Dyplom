@@ -106,11 +106,27 @@ def tokenize(value: str) -> set[str]:
     }
 
 
+def tokens_overlap(query_tokens: set[str], document_tokens: set[str]) -> int:
+    overlap = 0
+    for query_token in query_tokens:
+        if query_token in document_tokens:
+            overlap += 1
+            continue
+        if len(query_token) < 6:
+            continue
+        query_prefix = query_token[:5]
+        if any(len(document_token) >= 6 and document_token.startswith(query_prefix) for document_token in document_tokens):
+            overlap += 1
+    return overlap
+
+
 class KnowledgeBaseService:
     def __init__(self, path: Path = KNOWLEDGE_BASE_PATH) -> None:
         raw_entries = json.loads(path.read_text(encoding="utf-8"))
         self.entries = [KnowledgeBaseEntry.from_dict(item) for item in raw_entries]
-        self._primary_tokens = {entry.id: tokenize(entry.primary_text) for entry in self.entries}
+        self._title_tokens = {entry.id: tokenize(entry.title) for entry in self.entries}
+        self._question_tokens = {entry.id: tokenize(entry.question) for entry in self.entries}
+        self._tag_tokens = {entry.id: tokenize(" ".join(entry.tags)) for entry in self.entries}
         self._answer_tokens = {entry.id: tokenize(entry.answer) for entry in self.entries}
 
     def search(self, question: str, *, limit: int | None = None) -> list[KnowledgeMatch]:
@@ -120,10 +136,12 @@ class KnowledgeBaseService:
 
         matches = []
         for entry in self.entries:
-            primary_overlap = len(query_tokens & self._primary_tokens[entry.id])
-            answer_overlap = len(query_tokens & self._answer_tokens[entry.id])
-            weighted_overlap = primary_overlap * 3 + answer_overlap
-            score = min(weighted_overlap / max(len(query_tokens) * 3, 1), 1.0)
+            title_overlap = tokens_overlap(query_tokens, self._title_tokens[entry.id])
+            question_overlap = tokens_overlap(query_tokens, self._question_tokens[entry.id])
+            tag_overlap = tokens_overlap(query_tokens, self._tag_tokens[entry.id])
+            answer_overlap = tokens_overlap(query_tokens, self._answer_tokens[entry.id])
+            weighted_overlap = title_overlap * 5 + question_overlap * 4 + tag_overlap * 2 + answer_overlap * 0.5
+            score = min(weighted_overlap / max(len(query_tokens) * 7, 1), 1.0)
             if score > 0:
                 matches.append(KnowledgeMatch(entry=entry, score=round(score, 4)))
 

@@ -66,13 +66,13 @@ class Settings(BaseSettings):
     classifier_warmup_on_startup: bool = True
     voice_assistant_use_llm: bool = True
     voice_assistant_reuse_classifier_model: bool = True
-    voice_assistant_max_new_tokens: int = Field(default=140, ge=32, le=600)
+    voice_assistant_max_new_tokens: int = Field(default=1200, ge=32, le=2000)
     voice_assistant_min_confidence: float = Field(default=0.12, ge=0, le=1)
     voice_assistant_max_context_items: int = Field(default=1, ge=1, le=5)
     voice_assistant_tts_enabled: bool = True
     voice_assistant_tts_voice: str = "uk-UA-PolinaNeural"
     voice_assistant_tts_rate: str = "+0%"
-    voice_assistant_tts_max_chars: int = Field(default=1800, ge=100, le=4000)
+    voice_assistant_tts_max_chars: int = Field(default=4000, ge=100, le=4000)
 
     @field_validator("audio_storage_dir", "lora_adapter_path", mode="after")
     @classmethod

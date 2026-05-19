@@ -166,7 +166,7 @@ function VoiceAssistantWorkspace() {
         </div>
         <button className="secondary-button" onClick={resetConversation} type="button">
           <RotateCcw size={18} />
-          Новий дзвінок
+          Оновити
         </button>
       </div>
 
