@@ -7,11 +7,12 @@ import logging
 import math
 import re
 import unicodedata
-from contextlib import nullcontext
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 from app.core.config import get_settings
 from app.schemas.voice_assistant import VoiceAssistantResponse, VoiceAssistantSource
@@ -144,6 +145,12 @@ class KnowledgeBaseEntry:
 class KnowledgeMatch:
     entry: KnowledgeBaseEntry
     score: float
+
+
+class GenerativeModel(Protocol):
+    def eval(self) -> Any: ...
+
+    def generate(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -377,7 +384,7 @@ class BaseQwenAssistantService:
                 classifier = get_classifier_service()
                 self.torch = classifier.torch
                 self.tokenizer = classifier.tokenizer
-                self.model = classifier.model
+                self.model: GenerativeModel = cast(GenerativeModel, classifier.model)
                 self.model_name = f"{settings.llm_base_model} без LoRA"
                 self.uses_classifier_model = True
                 self.model.eval()
@@ -399,11 +406,14 @@ class BaseQwenAssistantService:
             settings.llm_base_model,
             trust_remote_code=True,
         )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            settings.llm_base_model,
-            device_map=settings.llm_device,
-            torch_dtype="auto",
-            trust_remote_code=True,
+        self.model = cast(
+            GenerativeModel,
+            AutoModelForCausalLM.from_pretrained(
+                settings.llm_base_model,
+                device_map=settings.llm_device,
+                torch_dtype="auto",
+                trust_remote_code=True,
+            ),
         )
         self.model.eval()
 
@@ -419,11 +429,13 @@ class BaseQwenAssistantService:
         if model_device is not None:
             inputs = inputs.to(model_device)
 
-        adapter_context = (
-            self.model.disable_adapter()
-            if self.uses_classifier_model and hasattr(self.model, "disable_adapter")
-            else nullcontext()
-        )
+        adapter_context: AbstractContextManager[Any] = nullcontext()
+        disable_adapter = getattr(self.model, "disable_adapter", None)
+        if self.uses_classifier_model and callable(disable_adapter):
+            adapter_context = cast(
+                Callable[[], AbstractContextManager[Any]],
+                disable_adapter,
+            )()
         with self.torch.no_grad(), adapter_context:
             generated = self.model.generate(
                 **inputs,

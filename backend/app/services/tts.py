@@ -76,8 +76,9 @@ class TextToSpeechService:
         chunks: list[bytes] = []
         try:
             async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    chunks.append(chunk["data"])
+                data = chunk.get("data")
+                if chunk.get("type") == "audio" and isinstance(data, bytes):
+                    chunks.append(data)
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
