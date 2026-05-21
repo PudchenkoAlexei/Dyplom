@@ -37,3 +37,39 @@ def test_voice_assistant_falls_back_for_unknown_question(monkeypatch) -> None:
     assert response.source == "fallback"
     assert response.can_create_ticket is True
     assert response.sources == []
+
+
+def test_knowledge_base_includes_answer_context_for_academic_mobility() -> None:
+    service = KnowledgeBaseService()
+
+    matches = service.search("Де дізнатись про академічну мобільність?", limit=3)
+
+    assert any(match.entry.source_url == "https://kpi.ua/gbook-12" for match in matches)
+
+
+def test_voice_assistant_uses_reliable_retrieval_without_direct_rules(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.voice_assistant.settings.voice_assistant_use_llm", False)
+    service = VoiceAssistantService()
+
+    response = service._answer_sync("Де дізнатись про академічну мобільність?")
+
+    assert response.source == "knowledge_base"
+    assert response.sources[0].url == "https://kpi.ua/gbook-12"
+
+
+def test_voice_assistant_falls_back_for_ambiguous_broad_dormitory_question() -> None:
+    service = VoiceAssistantService()
+
+    response = service._answer_sync("Куди звертатися з питанням по гуртожитку?")
+
+    assert response.source == "fallback"
+    assert response.sources == []
+
+
+def test_voice_assistant_falls_back_for_missing_payment_requisites_source() -> None:
+    service = VoiceAssistantService()
+
+    response = service._answer_sync("Де взяти реквізити для оплати навчання?")
+
+    assert response.source == "fallback"
+    assert response.sources == []

@@ -1,5 +1,6 @@
 param(
     [switch]$SkipInstall,
+    [switch]$SkipPbx,
     [switch]$NoOpen
 )
 
@@ -26,6 +27,11 @@ function Test-Command($Name) {
 
 function Test-PortFree($Port) {
     $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    return $null -eq $listener
+}
+
+function Test-UdpPortFree($Port) {
+    $listener = Get-NetUDPEndpoint -LocalPort $Port -ErrorAction SilentlyContinue
     return $null -eq $listener
 }
 
@@ -180,14 +186,24 @@ if (-not (Test-PortFree 8000)) {
 if (-not (Test-PortFree 3000)) {
     throw "Port 3000 is already busy. Run .\scripts\stop.ps1 first."
 }
+if (-not $SkipPbx -and -not (Test-UdpPortFree 5060)) {
+    throw "UDP port 5060 is already busy. Close the other SIP/PBX service or run with -SkipPbx."
+}
+if (-not $SkipPbx -and -not (Test-PortFree 8088)) {
+    throw "Port 8088 is already busy. Close the other PBX WebSocket service or run with -SkipPbx."
+}
 
 $PythonExe = Resolve-Python
 $PythonExe = Ensure-BackendDependencies $PythonExe
 Ensure-FrontendDependencies
 
-Write-Step "Starting PostgreSQL"
+Write-Step "Starting PostgreSQL and PBX"
 Wait-DockerReady
-docker compose up -d postgres
+if ($SkipPbx) {
+    docker compose up -d postgres
+} else {
+    docker compose up -d --build postgres asterisk
+}
 Wait-PostgresHealthy
 
 Write-Step "Preparing database"
@@ -222,6 +238,9 @@ if (-not $frontendReady) {
 Write-Step "Project is running"
 Write-Host "Site:     http://127.0.0.1:3000/login" -ForegroundColor Green
 Write-Host "API:      http://127.0.0.1:8000/health" -ForegroundColor Green
+if (-not $SkipPbx) {
+    Write-Host "PBX:      SIP 127.0.0.1:5060, WebRTC ws://127.0.0.1:8088/ws, call 7000" -ForegroundColor Green
+}
 Write-Host ""
 Write-Host "Users:"
 Write-Host "  student@kpi.ua   / StudentPassword123!"

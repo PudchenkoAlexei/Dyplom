@@ -16,6 +16,21 @@ services:
       timeout: 5s
       retries: 10
 
+  asterisk:
+    build:
+      context: .
+      dockerfile: pbx/Dockerfile
+    container_name: kpi-helpdesk-asterisk
+    environment:
+      KPI_BACKEND_PHONE_ASSISTANT_URL: http://host.docker.internal:8000/api/v1/phone-assistant/ask
+      KPI_PBX_INTERNAL_TOKEN: ${PBX_INTERNAL_TOKEN:-change-this-pbx-token-for-development}
+      KPI_PBX_PUBLIC_IP: ${KPI_PBX_PUBLIC_IP:-}
+    ports:
+      - "5060:5060/udp"
+      - "8088:8088/tcp"
+      - "10000-10020:10000-10020/udp"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   postgres_data:
-

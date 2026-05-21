@@ -34,6 +34,7 @@ cd Dyplom
 ```text
 Frontend: http://127.0.0.1:3000/login
 Backend:  http://127.0.0.1:8000/health
+PBX:      SIP 127.0.0.1:5060, WebRTC ws://127.0.0.1:8088/ws, номер довідкової 7000
 ```
 
 Корисні команди:
@@ -41,6 +42,7 @@ Backend:  http://127.0.0.1:8000/health
 ```powershell
 .\scripts\start.ps1 -NoOpen
 .\scripts\start.ps1 -SkipInstall
+.\scripts\start.ps1 -SkipPbx
 .\scripts\status.ps1
 .\scripts\stop.ps1
 ```
@@ -61,14 +63,66 @@ operator2@kpi.ua / OperatorPassword123!
 admin@kpi.ua     / AdminPassword123!
 ```
 
+## Телефонна довідкова через PBX
+
+Голосова довідкова може працювати не тільки зі сторінки `/assistant`, а й через
+телефонний дзвінок на PBX-сервер Asterisk.
+
+Локальний сценарій:
+
+1. Запустіть проєкт:
+
+```powershell
+.\scripts\start.ps1 -NoOpen
+```
+
+2. Найпростіший варіант для користувача: зайдіть у вебзастосунок, відкрийте
+   розділ `Довідкова` і натисніть `Подзвонити з додатку`.
+
+Браузер реєструється в Asterisk як WebRTC SIP-клієнт `7002`, дзвонить на
+номер `7000`, а PBX обробляє дзвінок так само, як звичайну телефонну лінію.
+
+3. Альтернативно можна підключитися через SIP softphone (MicroSIP, Zoiper,
+   Linphone):
+
+```text
+SIP server: 127.0.0.1
+Port:       5060
+Login:      7001
+Password:   KpiPhone7001!
+Transport:  UDP
+```
+
+4. Зателефонуйте на номер `7000`.
+
+Asterisk відповідає на дзвінок, подає сигнал, записує питання у WAV, передає
+його в backend endpoint `/api/v1/phone-assistant/ask`, backend розпізнає аудіо,
+формує відповідь через базу знань довідкової, генерує TTS і повертає аудіо для
+програвання у телефон.
+
+Змінна `PBX_INTERNAL_TOKEN` у `.env` має збігатися з токеном, який контейнер
+Asterisk передає в backend. У development використовується значення за
+замовчуванням, але для production його потрібно змінити.
+
+Для дзвінка з браузера frontend використовує змінні:
+
+```text
+NEXT_PUBLIC_PBX_WS_URL=ws://127.0.0.1:8088/ws
+NEXT_PUBLIC_PBX_SIP_DOMAIN=127.0.0.1
+NEXT_PUBLIC_PBX_WEBRTC_EXTENSION=7002
+NEXT_PUBLIC_PBX_WEBRTC_PASSWORD=KpiWebPhone7002!
+NEXT_PUBLIC_PBX_ASSISTANT_NUMBER=7000
+```
+
 ## Структура проєкту
 
 ```text
 frontend/          Next.js frontend
 backend/           FastAPI backend
 ml/                датасет, конфіги, навчання LoRA-моделі
+pbx/               Asterisk PBX, SIP-конфіги та bridge-скрипт телефонної довідкової
 scripts/           PowerShell-скрипти запуску та зупинки
-docker-compose.yml PostgreSQL для локального запуску
+docker-compose.yml PostgreSQL та Asterisk для локального запуску
 .env.example       приклад змінних середовища
 ```
 

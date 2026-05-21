@@ -6,18 +6,26 @@ $RootDir = Split-Path -Parent $ScriptDir
 Set-Location $RootDir
 
 Write-Host "Ports:" -ForegroundColor Cyan
-$ports = Get-NetTCPConnection -LocalPort 3000,8000,5432 -ErrorAction SilentlyContinue |
+$ports = Get-NetTCPConnection -LocalPort 3000,8000,8088,5432 -ErrorAction SilentlyContinue |
     Select-Object LocalAddress, LocalPort, State, OwningProcess
 if ($ports) {
     $ports | Format-Table -AutoSize
 } else {
-    Write-Host "  No listeners on 3000, 8000 or 5432."
+    Write-Host "  No listeners on 3000, 8000, 8088 or 5432."
+}
+
+$udpPorts = Get-NetUDPEndpoint -LocalPort 5060 -ErrorAction SilentlyContinue |
+    Select-Object LocalAddress, LocalPort, OwningProcess
+if ($udpPorts) {
+    Write-Host ""
+    Write-Host "UDP:" -ForegroundColor Cyan
+    $udpPorts | Format-Table -AutoSize
 }
 
 Write-Host ""
 Write-Host "Docker:" -ForegroundColor Cyan
 if (Get-Command docker -ErrorAction SilentlyContinue) {
-    docker ps --filter "name=kpi-helpdesk-postgres" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    docker ps --filter "name=kpi-helpdesk" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 } else {
     Write-Host "  Docker CLI not found."
 }

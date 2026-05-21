@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import json
 import logging
+import math
 import re
+import unicodedata
 from contextlib import nullcontext
 from dataclasses import dataclass
 from functools import lru_cache
@@ -20,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 KNOWLEDGE_BASE_PATH = Path(__file__).resolve().parents[1] / "data" / "kpi_faq_knowledge_base.json"
 TOKEN_RE = re.compile(r"[0-9a-zа-щьюяґєії']{2,}", re.IGNORECASE)
+NON_TOKEN_RE = re.compile(r"[^0-9a-zа-щьюяґєії]+", re.IGNORECASE)
 STOP_WORDS = {
     "або",
     "але",
@@ -56,7 +60,55 @@ STOP_WORDS = {
     "як",
     "який",
     "яка",
+    "якщо",
+    "куди",
+    "питання",
+    "дізнатись",
+    "дізнатися",
+    "отримати",
+    "подати",
+    "взяти",
+    "оформити",
 }
+
+UKRAINIAN_SUFFIXES = (
+    "ність",
+    "ності",
+    "ністю",
+    "ання",
+    "ення",
+    "ами",
+    "ями",
+    "ого",
+    "ему",
+    "ому",
+    "ими",
+    "ої",
+    "ою",
+    "ею",
+    "ах",
+    "ях",
+    "ам",
+    "ям",
+    "ом",
+    "ем",
+    "ів",
+    "їв",
+    "ий",
+    "ій",
+    "их",
+    "а",
+    "я",
+    "у",
+    "ю",
+    "е",
+    "є",
+    "и",
+    "і",
+    "о",
+)
+
+SEARCH_FIELDS = ("title", "question", "tags", "answer")
 
 
 @dataclass(frozen=True)
@@ -94,40 +146,126 @@ class KnowledgeMatch:
     score: float
 
 
+@dataclass(frozen=True)
+class EntrySearchIndex:
+    entry: KnowledgeBaseEntry
+    tokens: dict[str, tuple[str, ...]]
+    stems: dict[str, set[str]]
+    ngrams: dict[str, set[str]]
+
+
 def normalize_text(value: str) -> str:
     return " ".join(value.split())
 
 
-def tokenize(value: str) -> set[str]:
-    return {
+def normalize_for_search(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = normalized.casefold().replace("’", "'").replace("`", "'")
+    return normalize_text(normalized)
+
+
+def tokenize(value: str) -> tuple[str, ...]:
+    return tuple(
         token.casefold()
-        for token in TOKEN_RE.findall(value)
+        for token in TOKEN_RE.findall(normalize_for_search(value))
         if token.casefold() not in STOP_WORDS
+    )
+
+
+def stem_token(token: str) -> str:
+    if len(token) < 6:
+        return token
+    for suffix in UKRAINIAN_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 5:
+            return token[: -len(suffix)]
+    return token
+
+
+def char_ngrams(value: str, *, size: int = 4) -> set[str]:
+    compact = f" {NON_TOKEN_RE.sub(' ', normalize_for_search(value))} "
+    return {compact[index : index + size] for index in range(max(0, len(compact) - size + 1))}
+
+
+def field_tokens(entry: KnowledgeBaseEntry) -> dict[str, str]:
+    return {
+        "title": entry.title,
+        "question": entry.question,
+        "tags": " ".join(entry.tags),
+        "answer": entry.answer,
     }
 
 
-def tokens_overlap(query_tokens: set[str], document_tokens: set[str]) -> int:
-    overlap = 0
-    for query_token in query_tokens:
-        if query_token in document_tokens:
-            overlap += 1
+def token_match_quality(query_token: str, query_stem: str, field_tokens: set[str], field_stems: set[str]) -> float:
+    if query_token in field_tokens or query_stem in field_stems:
+        return 1.0
+    if len(query_stem) < 7:
+        return 0.0
+    for field_stem in field_stems:
+        if len(field_stem) < 7:
             continue
-        if len(query_token) < 6:
-            continue
-        query_prefix = query_token[:5]
-        if any(len(document_token) >= 6 and document_token.startswith(query_prefix) for document_token in document_tokens):
-            overlap += 1
-    return overlap
+        common_prefix = 0
+        for left, right in zip(query_stem, field_stem):
+            if left != right:
+                break
+            common_prefix += 1
+        if common_prefix >= 6 and common_prefix / min(len(query_stem), len(field_stem)) >= 0.72:
+            return 0.65
+    return 0.0
+
+
+def ngram_similarity(query_ngrams: set[str], document_ngrams: set[str]) -> float:
+    if not query_ngrams or not document_ngrams:
+        return 0.0
+    return len(query_ngrams & document_ngrams) / len(query_ngrams)
+
+
+def phrase_match_score(query_stems: tuple[str, ...], document_tokens: tuple[str, ...]) -> float:
+    if len(query_stems) < 2:
+        return 0.0
+    document_stems = tuple(stem_token(token) for token in document_tokens)
+    query_pairs = list(zip(query_stems, query_stems[1:]))
+    if not query_pairs:
+        return 0.0
+
+    matched_pairs = 0
+    for left, right in query_pairs:
+        for index in range(len(document_stems) - 1):
+            if document_stems[index] == left and document_stems[index + 1] == right:
+                matched_pairs += 1
+                break
+    return matched_pairs / len(query_pairs)
 
 
 class KnowledgeBaseService:
     def __init__(self, path: Path = KNOWLEDGE_BASE_PATH) -> None:
         raw_entries = json.loads(path.read_text(encoding="utf-8"))
         self.entries = [KnowledgeBaseEntry.from_dict(item) for item in raw_entries]
-        self._title_tokens = {entry.id: tokenize(entry.title) for entry in self.entries}
-        self._question_tokens = {entry.id: tokenize(entry.question) for entry in self.entries}
-        self._tag_tokens = {entry.id: tokenize(" ".join(entry.tags)) for entry in self.entries}
-        self._answer_tokens = {entry.id: tokenize(entry.answer) for entry in self.entries}
+        self._index = [self._build_index(entry) for entry in self.entries]
+        self._idf = self._build_idf(self._index)
+
+    @staticmethod
+    def _build_index(entry: KnowledgeBaseEntry) -> EntrySearchIndex:
+        fields = field_tokens(entry)
+        tokens = {field: tokenize(value) for field, value in fields.items()}
+        return EntrySearchIndex(
+            entry=entry,
+            tokens=tokens,
+            stems={field: {stem_token(token) for token in values} for field, values in tokens.items()},
+            ngrams={field: char_ngrams(value) for field, value in fields.items()},
+        )
+
+    @staticmethod
+    def _build_idf(index: list[EntrySearchIndex]) -> dict[str, float]:
+        document_frequency: Counter[str] = Counter()
+        for item in index:
+            document_stems = set().union(*(item.stems[field] for field in SEARCH_FIELDS))
+            document_frequency.update(document_stems)
+
+        document_count = len(index)
+        return {
+            stem: math.log((document_count + 1) / (count + 0.5)) + 1
+            for stem, count in document_frequency.items()
+        }
 
     def search(self, question: str, *, limit: int | None = None) -> list[KnowledgeMatch]:
         query_tokens = tokenize(question)
@@ -135,18 +273,100 @@ class KnowledgeBaseService:
             return []
 
         matches = []
-        for entry in self.entries:
-            title_overlap = tokens_overlap(query_tokens, self._title_tokens[entry.id])
-            question_overlap = tokens_overlap(query_tokens, self._question_tokens[entry.id])
-            tag_overlap = tokens_overlap(query_tokens, self._tag_tokens[entry.id])
-            answer_overlap = tokens_overlap(query_tokens, self._answer_tokens[entry.id])
-            weighted_overlap = title_overlap * 5 + question_overlap * 4 + tag_overlap * 2 + answer_overlap * 0.5
-            score = min(weighted_overlap / max(len(query_tokens) * 7, 1), 1.0)
+        query_stems = tuple(stem_token(token) for token in query_tokens)
+        query_ngrams = char_ngrams(question)
+        for item in self._index:
+            score = self._score_entry(query_tokens, query_stems, query_ngrams, item)
             if score > 0:
-                matches.append(KnowledgeMatch(entry=entry, score=round(score, 4)))
+                matches.append(KnowledgeMatch(entry=item.entry, score=round(score, 4)))
 
         matches.sort(key=lambda item: item.score, reverse=True)
         return matches[: limit or settings.voice_assistant_max_context_items]
+
+    def _coverage(
+        self,
+        query_tokens: tuple[str, ...],
+        query_stems: tuple[str, ...],
+        document_tokens: set[str],
+        document_stems: set[str],
+    ) -> float:
+        denominator = sum(self._idf.get(stem, 2.0) for stem in query_stems)
+        if denominator <= 0:
+            return 0.0
+
+        score = 0.0
+        for token, stem in zip(query_tokens, query_stems):
+            score += self._idf.get(stem, 2.0) * token_match_quality(
+                token,
+                stem,
+                document_tokens,
+                document_stems,
+            )
+        return score / denominator
+
+    def _score_entry(
+        self,
+        query_tokens: tuple[str, ...],
+        query_stems: tuple[str, ...],
+        query_ngrams: set[str],
+        item: EntrySearchIndex,
+    ) -> float:
+        primary_tokens = set(item.tokens["title"]) | set(item.tokens["question"]) | set(item.tokens["tags"])
+        primary_stems = item.stems["title"] | item.stems["question"] | item.stems["tags"]
+        full_tokens = primary_tokens | set(item.tokens["answer"])
+        full_stems = primary_stems | item.stems["answer"]
+
+        title_coverage = self._coverage(query_tokens, query_stems, set(item.tokens["title"]), item.stems["title"])
+        question_coverage = self._coverage(
+            query_tokens,
+            query_stems,
+            set(item.tokens["question"]),
+            item.stems["question"],
+        )
+        tag_coverage = self._coverage(query_tokens, query_stems, set(item.tokens["tags"]), item.stems["tags"])
+        primary_coverage = self._coverage(query_tokens, query_stems, primary_tokens, primary_stems)
+        answer_coverage = self._coverage(
+            query_tokens,
+            query_stems,
+            set(item.tokens["answer"]),
+            item.stems["answer"],
+        )
+        full_coverage = self._coverage(query_tokens, query_stems, full_tokens, full_stems)
+
+        primary_ngram_score = max(
+            ngram_similarity(query_ngrams, item.ngrams["title"]),
+            ngram_similarity(query_ngrams, item.ngrams["question"]),
+            ngram_similarity(query_ngrams, item.ngrams["tags"]),
+        )
+        answer_ngram_score = ngram_similarity(query_ngrams, item.ngrams["answer"])
+        primary_phrase_score = max(
+            phrase_match_score(query_stems, item.tokens["title"]),
+            phrase_match_score(query_stems, item.tokens["question"]),
+            phrase_match_score(query_stems, item.tokens["tags"]),
+        )
+        answer_phrase_score = phrase_match_score(query_stems, item.tokens["answer"])
+
+        field_score = max(
+            title_coverage,
+            question_coverage * 0.95,
+            tag_coverage * 0.9,
+            primary_coverage * 0.86,
+        )
+        score = (
+            field_score * 0.55
+            + full_coverage * 0.2
+            + primary_ngram_score * 0.08
+            + answer_ngram_score * 0.04
+            + primary_phrase_score * 0.08
+            + answer_phrase_score * 0.3
+        )
+
+        if primary_coverage < 0.34 and answer_coverage > 0 and answer_phrase_score == 0:
+            score *= 0.68
+        if len(query_tokens) <= 2 and primary_coverage < 0.75 and answer_phrase_score == 0:
+            score *= 0.82
+
+        return min(score, 1.0)
 
 
 class BaseQwenAssistantService:
@@ -232,6 +452,8 @@ class BaseQwenAssistantService:
                 "content": (
                     "Ти голосовий консультант довідкової служби КПІ. "
                     "Відповідай українською, коротко, доброзичливо і природно для усного мовлення. "
+                    "Не використовуй режим міркування, не генеруй <think> і не пояснюй хід думок. "
+                    "Давай не більше двох коротких речень, щоб відповідь було зручно слухати телефоном. "
                     "Використовуй тільки надані джерела. "
                     "Якщо в джерелах недостатньо інформації, скажи, що краще створити заявку."
                 ),
@@ -241,7 +463,7 @@ class BaseQwenAssistantService:
                 "content": (
                     f"Питання користувача: {question}\n\n"
                     f"Доступні джерела:\n{context}\n\n"
-                    "Сформуй одну коротку відповідь для озвучення голосом. "
+                    "Сформуй одну коротку відповідь для озвучення голосом: максимум два речення і приблизно до 450 символів. "
                     "Не додавай Markdown, URL, списки й службові пояснення."
                 ),
             },
@@ -266,10 +488,10 @@ class VoiceAssistantService:
 
     def _answer_sync(self, question: str) -> VoiceAssistantResponse:
         matches = self.knowledge_base.search(question)
-        best_score = matches[0].score if matches else 0.0
-        if best_score < settings.voice_assistant_min_confidence:
+        if not self._has_reliable_match(matches):
             return self._fallback_response(question)
 
+        best_score = matches[0].score
         used_llm = False
         model_name: str | None = None
         answer_text = ""
@@ -298,6 +520,13 @@ class VoiceAssistantService:
             used_llm=used_llm,
             model_name=model_name,
         )
+
+    @staticmethod
+    def _has_reliable_match(matches: list[KnowledgeMatch]) -> bool:
+        if not matches:
+            return False
+        best_score = matches[0].score
+        return best_score >= settings.voice_assistant_min_confidence
 
     @staticmethod
     def _extractive_answer(entry: KnowledgeBaseEntry) -> str:

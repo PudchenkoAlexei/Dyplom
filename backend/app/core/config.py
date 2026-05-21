@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
     allowed_hosts: list[str] = Field(
-        default_factory=lambda: ["localhost", "127.0.0.1", "testserver"]
+        default_factory=lambda: ["localhost", "127.0.0.1", "host.docker.internal", "testserver"]
     )
     security_headers_enabled: bool = True
 
@@ -66,13 +66,17 @@ class Settings(BaseSettings):
     classifier_warmup_on_startup: bool = True
     voice_assistant_use_llm: bool = True
     voice_assistant_reuse_classifier_model: bool = True
-    voice_assistant_max_new_tokens: int = Field(default=1200, ge=32, le=2000)
-    voice_assistant_min_confidence: float = Field(default=0.12, ge=0, le=1)
-    voice_assistant_max_context_items: int = Field(default=1, ge=1, le=5)
+    voice_assistant_max_new_tokens: int = Field(default=320, ge=32, le=2000)
+    voice_assistant_min_confidence: float = Field(default=0.5, ge=0, le=1)
+    voice_assistant_max_context_items: int = Field(default=3, ge=1, le=5)
     voice_assistant_tts_enabled: bool = True
     voice_assistant_tts_voice: str = "uk-UA-PolinaNeural"
     voice_assistant_tts_rate: str = "+0%"
-    voice_assistant_tts_max_chars: int = Field(default=4000, ge=100, le=4000)
+    voice_assistant_tts_max_chars: int = Field(default=900, ge=100, le=4000)
+    pbx_internal_token: str = Field(
+        default="change-this-pbx-token-for-development",
+        min_length=24,
+    )
 
     @field_validator("audio_storage_dir", "lora_adapter_path", mode="after")
     @classmethod
@@ -103,6 +107,8 @@ class Settings(BaseSettings):
             raise RuntimeError("CORS_ORIGINS cannot contain '*' outside development.")
         if "*" in self.allowed_hosts:
             raise RuntimeError("ALLOWED_HOSTS cannot contain '*' outside development.")
+        if self.pbx_internal_token.startswith("change-this"):
+            raise RuntimeError("PBX_INTERNAL_TOKEN must be changed outside development.")
         return self
 
     @property

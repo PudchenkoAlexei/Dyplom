@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { AuthGuard } from "@/components/AuthGuard";
 import { ErrorState, LoadingState } from "@/components/FeedbackState";
+import { PbxCallButton } from "@/components/PbxCallButton";
 import { ProfileRequired } from "@/components/ProfileRequired";
 import { SpeechPlaybackButton } from "@/components/SpeechPlaybackButton";
 import { useAuth } from "@/lib/auth";
@@ -253,6 +254,10 @@ function VoiceAssistantWorkspace() {
                 )}
               </>
             )}
+          </section>
+
+          <section className="panel assistant-phone-panel">
+            <PbxCallButton />
           </section>
         </div>
       )}

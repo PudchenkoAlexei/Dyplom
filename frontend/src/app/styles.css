@@ -538,6 +538,243 @@ a {
   margin: 0;
 }
 
+.assistant-phone-panel {
+  grid-column: 1 / -1;
+}
+
+.pbx-call-box {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.pbx-call-status {
+  display: grid;
+  gap: 4px;
+}
+
+.pbx-call-status span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pbx-call-status small {
+  color: #315b50;
+  font-size: 13px;
+  line-height: 1.4;
+  max-width: 460px;
+}
+
+.pbx-call-screen-backdrop {
+  align-items: center;
+  background: rgba(14, 25, 22, 0.72);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 60;
+}
+
+.pbx-call-screen {
+  align-items: center;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0)),
+    #173d35;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  box-shadow: 0 28px 80px rgba(5, 14, 12, 0.36);
+  color: #f7fbf9;
+  display: grid;
+  gap: 24px;
+  justify-items: center;
+  max-width: 460px;
+  min-height: 560px;
+  overflow: hidden;
+  padding: 26px;
+  position: relative;
+  text-align: center;
+  width: min(100%, 460px);
+}
+
+.pbx-call-screen::before {
+  background:
+    radial-gradient(circle at 20% 18%, rgba(224, 177, 74, 0.2), transparent 34%),
+    radial-gradient(circle at 82% 78%, rgba(57, 130, 107, 0.42), transparent 42%);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.pbx-call-screen > * {
+  position: relative;
+  z-index: 1;
+}
+
+.pbx-call-screen-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.pbx-call-live,
+.pbx-call-timer {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 750;
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+.pbx-call-live {
+  gap: 8px;
+}
+
+.pbx-call-live span {
+  animation: call-dot 1.2s ease-in-out infinite;
+  background: #65d89c;
+  border-radius: 999px;
+  box-shadow: 0 0 0 6px rgba(101, 216, 156, 0.14);
+  height: 8px;
+  width: 8px;
+}
+
+.pbx-call-timer {
+  font-variant-numeric: tabular-nums;
+}
+
+.pbx-call-avatar {
+  align-items: center;
+  background: #f7fbf9;
+  border-radius: 50%;
+  color: var(--primary);
+  display: grid;
+  height: 132px;
+  justify-items: center;
+  margin-top: 10px;
+  place-items: center;
+  position: relative;
+  width: 132px;
+}
+
+.pbx-call-pulse {
+  animation: call-pulse 1.8s ease-out infinite;
+  border: 2px solid rgba(247, 251, 249, 0.55);
+  border-radius: 50%;
+  inset: -16px;
+  position: absolute;
+}
+
+.pbx-call-screen-copy {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.pbx-call-screen-copy .muted {
+  color: #b8cbc4;
+}
+
+.pbx-call-screen-copy h2 {
+  font-size: 34px;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.pbx-call-screen-copy p {
+  color: #dfece7;
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.pbx-call-screen-copy small {
+  color: #bfd5cd;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 340px;
+}
+
+.pbx-call-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+.pbx-call-mute-button,
+.pbx-call-hangup-button {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 10px;
+  justify-content: center;
+  min-height: 58px;
+  padding: 14px 22px;
+}
+
+.pbx-call-mute-button {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  color: #f7fbf9;
+  min-width: 156px;
+}
+
+.pbx-call-mute-button.muted {
+  background: #f8faf8;
+  border-color: #ffffff;
+  color: #173d35;
+}
+
+.pbx-call-mute-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.pbx-call-hangup-button {
+  background: #d92d20;
+  border: 1px solid #ffb4ae;
+  color: #fff;
+  min-width: 172px;
+}
+
+.pbx-call-hangup-button:hover {
+  background: #b42318;
+}
+
+@keyframes call-pulse {
+  0% {
+    opacity: 0.85;
+    transform: scale(0.9);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+@keyframes call-dot {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
 .source-list {
   display: grid;
   gap: 8px;
@@ -710,4 +947,19 @@ a {
   .meta-grid {
     grid-template-columns: 1fr;
   }
+
+  .pbx-call-screen-backdrop {
+    padding: 14px;
+  }
+
+  .pbx-call-screen {
+    gap: 20px;
+    min-height: min(560px, calc(100vh - 28px));
+    padding: 20px;
+  }
+
+  .pbx-call-screen-copy h2 {
+    font-size: 28px;
+  }
+
 }
