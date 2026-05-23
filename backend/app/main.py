@@ -13,6 +13,7 @@ from app.api.v1 import auth, catalog, phone_assistant, tickets, users, voice_ass
 from app.core.config import get_settings
 from app.services.classifier import get_classifier_service
 from app.services.stt import get_stt_service
+from app.services.voice_assistant import get_phone_qwen_assistant_service
 
 settings = get_settings()
 logger = logging.getLogger("uvicorn.error")
@@ -46,10 +47,34 @@ def warm_up_stt() -> None:
     )
 
 
+def warm_up_phone_assistant() -> None:
+    if not settings.voice_assistant_phone_warmup_on_startup:
+        logger.info("Phone assistant LLM warmup is disabled.")
+        return
+    if not settings.voice_assistant_use_llm or not settings.voice_assistant_phone_use_llm:
+        logger.info("Phone assistant LLM warmup skipped because LLM is disabled.")
+        return
+    if settings.voice_assistant_phone_inference_engine == "openai_compatible":
+        logger.info(
+            "Phone assistant uses an external OpenAI-compatible LLM endpoint; "
+            "local model warmup is skipped."
+        )
+        return
+
+    started_at = time.perf_counter()
+    logger.info("Warming up phone assistant LLM...")
+    get_phone_qwen_assistant_service()
+    logger.info(
+        "Phone assistant LLM warmed up in %.2f seconds.",
+        time.perf_counter() - started_at,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     warm_up_classifier()
     warm_up_stt()
+    warm_up_phone_assistant()
     yield
 
 

@@ -65,14 +65,41 @@ class Settings(BaseSettings):
     classifier_max_new_tokens: int = 128
     classifier_warmup_on_startup: bool = True
     voice_assistant_use_llm: bool = True
-    voice_assistant_reuse_classifier_model: bool = True
-    voice_assistant_max_new_tokens: int = Field(default=320, ge=32, le=2000)
+    voice_assistant_inference_engine: Literal["transformers", "openai_compatible"] = "transformers"
+    voice_assistant_model: str = "Qwen/Qwen3-4B-Instruct-2507"
+    voice_assistant_reuse_classifier_model: bool = False
+    voice_assistant_quantization: Literal["none", "8bit", "4bit"] = "none"
+    voice_assistant_openai_base_url: str = "http://127.0.0.1:8080/v1"
+    voice_assistant_openai_api_key: str = ""
+    voice_assistant_openai_timeout_seconds: float = Field(default=120.0, ge=1, le=600)
+    voice_assistant_openai_temperature: float = Field(default=0.0, ge=0, le=2)
+    voice_assistant_ai_guided_retrieval: bool = True
+    voice_assistant_search_query_count: int = Field(default=3, ge=1, le=5)
+    voice_assistant_search_candidates: int = Field(default=8, ge=3, le=15)
+    voice_assistant_max_new_tokens: int = Field(default=900, ge=32, le=2000)
+    voice_assistant_phone_use_llm: bool = True
+    voice_assistant_phone_inference_engine: Literal[
+        "transformers", "openai_compatible"
+    ] = "transformers"
+    voice_assistant_phone_model: str = "Qwen/Qwen3-1.7B"
+    voice_assistant_phone_reuse_classifier_model: bool = True
+    voice_assistant_phone_quantization: Literal["none", "8bit", "4bit"] = "none"
+    voice_assistant_phone_openai_base_url: str = "http://127.0.0.1:8080/v1"
+    voice_assistant_phone_openai_api_key: str = ""
+    voice_assistant_phone_openai_timeout_seconds: float = Field(default=120.0, ge=1, le=600)
+    voice_assistant_phone_openai_temperature: float = Field(default=0.0, ge=0, le=2)
+    voice_assistant_phone_warmup_on_startup: bool = False
+    voice_assistant_phone_max_new_tokens: int = Field(default=0, ge=0, le=2000)
+    voice_assistant_phone_ai_guided_retrieval: bool = False
+    voice_assistant_phone_max_context_items: int = Field(default=1, ge=1, le=3)
     voice_assistant_min_confidence: float = Field(default=0.5, ge=0, le=1)
-    voice_assistant_max_context_items: int = Field(default=3, ge=1, le=5)
+    voice_assistant_soft_min_confidence: float = Field(default=0.32, ge=0, le=1)
+    voice_assistant_max_context_items: int = Field(default=5, ge=1, le=8)
+    voice_assistant_context_score_ratio: float = Field(default=0.65, ge=0, le=1)
     voice_assistant_tts_enabled: bool = True
     voice_assistant_tts_voice: str = "uk-UA-PolinaNeural"
     voice_assistant_tts_rate: str = "+0%"
-    voice_assistant_tts_max_chars: int = Field(default=900, ge=100, le=4000)
+    voice_assistant_tts_max_chars: int = Field(default=0, ge=0, le=20000)
     pbx_internal_token: str = Field(
         default="change-this-pbx-token-for-development",
         min_length=24,

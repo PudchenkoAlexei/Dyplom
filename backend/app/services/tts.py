@@ -23,11 +23,31 @@ TTS_REPLACEMENTS = (
     ),
     (re.compile(r"\bFAQ\b", re.IGNORECASE), "\u043f\u043e\u0448\u0438\u0440\u0435\u043d\u0438\u0445 \u043f\u0438\u0442\u0430\u043d\u044c"),
     (re.compile(r"\bURL\b", re.IGNORECASE), "\u043f\u043e\u0441\u0438\u043b\u0430\u043d\u043d\u044f"),
+    (re.compile(r"\b\u0417\u0412\u041e\b", re.IGNORECASE), "\u0437\u0430\u043a\u043b\u0430\u0434 \u0432\u0438\u0449\u043e\u0457 \u043e\u0441\u0432\u0456\u0442\u0438"),
+    (re.compile(r"\b\u0412\u041d\u0417\b", re.IGNORECASE), "\u0432\u0438\u0449\u0438\u0439 \u043d\u0430\u0432\u0447\u0430\u043b\u044c\u043d\u0438\u0439 \u0437\u0430\u043a\u043b\u0430\u0434"),
     (re.compile(r"\b\u0456\u043c\.", re.IGNORECASE), "\u0456\u043c\u0435\u043d\u0456"),
     (re.compile(r"\b\u043f\u0440\.", re.IGNORECASE), "\u043f\u0440\u043e\u0441\u043f\u0435\u043a\u0442"),
+    (re.compile(r"\b\u043c\.", re.IGNORECASE), "\u043c\u0456\u0441\u0442\u043e"),
+    (re.compile(r"\b\u0432\u0443\u043b\.", re.IGNORECASE), "\u0432\u0443\u043b\u0438\u0446\u044f"),
+    (re.compile(r"\b\u043a\u0456\u043c\.", re.IGNORECASE), "\u043a\u0456\u043c\u043d\u0430\u0442\u0430"),
+    (re.compile(r"\u2116\s*", re.IGNORECASE), "\u043d\u043e\u043c\u0435\u0440 "),
     (re.compile(r"\bemail\b|\be-mail\b", re.IGNORECASE), "\u0435\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u043d\u0430 \u043f\u043e\u0448\u0442\u0430"),
     (re.compile(r"\b\u0442\u0435\u043b\./\u0444\u0430\u043a\u0441\b", re.IGNORECASE), "\u0442\u0435\u043b\u0435\u0444\u043e\u043d \u0456 \u0444\u0430\u043a\u0441"),
 )
+SPEECH_PAUSE_CLAUSE = re.compile(r";\s*")
+SPEECH_PAUSE_COLON = re.compile(r"(?<!\d):(?!\d)\s*")
+SPEECH_PAUSE_PERIOD = re.compile(r"(?<!\d)\.(?!\d)\s*")
+SPEECH_PAUSE_SENTENCE = re.compile(r"([!?])\s*")
+LONG_CLAUSE_COMMA = re.compile(r",\s+(?=[^\n,;:.!?]{45,})")
+
+
+def add_punctuation_pauses(text: str) -> str:
+    speech_text = LONG_CLAUSE_COMMA.sub(",\n", text)
+    speech_text = SPEECH_PAUSE_CLAUSE.sub(";\n", speech_text)
+    speech_text = SPEECH_PAUSE_COLON.sub(":\n", speech_text)
+    speech_text = SPEECH_PAUSE_PERIOD.sub(".\n", speech_text)
+    speech_text = SPEECH_PAUSE_SENTENCE.sub(r"\1\n", speech_text)
+    return re.sub(r"\n{3,}", "\n\n", speech_text).strip()
 
 
 def prepare_text_for_speech(text: str) -> str:
@@ -41,7 +61,7 @@ def prepare_text_for_speech(text: str) -> str:
         speech_text,
         flags=re.IGNORECASE,
     )
-    return normalize_text(speech_text)
+    return add_punctuation_pauses(normalize_text(speech_text))
 
 
 @dataclass(frozen=True)
@@ -67,7 +87,10 @@ class TextToSpeechService:
                 detail="Text-to-speech dependency is not installed.",
             ) from exc
 
-        speech_text = prepare_text_for_speech(text)[: settings.voice_assistant_tts_max_chars]
+        speech_text = prepare_text_for_speech(text)
+        if settings.voice_assistant_tts_max_chars > 0:
+            speech_text = speech_text[: settings.voice_assistant_tts_max_chars]
+
         communicate = edge_tts.Communicate(
             speech_text,
             settings.voice_assistant_tts_voice,
@@ -92,11 +115,12 @@ class TextToSpeechService:
                 detail="Text-to-speech service returned empty audio.",
             )
 
-        return TextToSpeechResult(
+        result = TextToSpeechResult(
             audio=audio,
             mime_type="audio/mpeg",
             voice=settings.voice_assistant_tts_voice,
         )
+        return result
 
 
 @lru_cache

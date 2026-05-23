@@ -110,6 +110,32 @@ UKRAINIAN_SUFFIXES = (
 )
 
 SEARCH_FIELDS = ("title", "question", "tags", "answer")
+ANSWER_TEXT_REPLACEMENTS = (
+    (
+        re.compile(
+            r"\b([а-щьюяґєії'’]+)\s+загублен(?:ий|а|е|і),\s+пошкоджен(?:ий|а|е|і)\s+або\s+втрачено\b",
+            re.IGNORECASE,
+        ),
+        r"\1 втрачено або пошкоджено",
+    ),
+    (re.compile(r"\bбувші\b", re.IGNORECASE), "колишні"),
+    (re.compile(r"\bбувших\b", re.IGNORECASE), "колишніх"),
+    (re.compile(r"\bбувшим\b", re.IGNORECASE), "колишнім"),
+    (re.compile(r"\bбувши студенти\b", re.IGNORECASE), "колишні студенти"),
+    (re.compile(r"\bбувших студентів\b", re.IGNORECASE), "колишніх студентів"),
+    (re.compile(r"\bбувшим студентам\b", re.IGNORECASE), "колишнім студентам"),
+    (re.compile(r"\bархіва\b", re.IGNORECASE), "архіву"),
+    (re.compile(r"\bПри собі мати\b"), "Потрібно мати при собі"),
+    (re.compile(r"\s*\(\s*корпус\s+(\d+)\s*\)", re.IGNORECASE), r" у корпусі \1"),
+    (re.compile(r"\bВ листі\b"), "У листі"),
+)
+ANSWER_INTRO_DROP_PATTERNS = (
+    re.compile(
+        r"^\s*(?:як|що|де|коли|куди|з яких|які|який|яка|чи|скільки|кому|хто)\b[^.?!]{8,360}[.?!]\s*",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^\s*Це (?:простий|нескладний) процес[^.?!]*[.?!]\s*", re.IGNORECASE),
+)
 
 
 @dataclass(frozen=True)
@@ -145,6 +171,12 @@ class KnowledgeBaseEntry:
 class KnowledgeMatch:
     entry: KnowledgeBaseEntry
     score: float
+
+
+@dataclass(frozen=True)
+class GuidedSearchPlan:
+    queries: tuple[str, ...]
+    raw_response: str
 
 
 class GenerativeModel(Protocol):
@@ -377,9 +409,22 @@ class KnowledgeBaseService:
 
 
 class BaseQwenAssistantService:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        model_name: str | None = None,
+        reuse_classifier_model: bool | None = None,
+        quantization: str | None = None,
+    ) -> None:
+        target_model_name = model_name or settings.voice_assistant_model
+        should_reuse_classifier = (
+            settings.voice_assistant_reuse_classifier_model
+            if reuse_classifier_model is None
+            else reuse_classifier_model
+        )
+        target_quantization = quantization or settings.voice_assistant_quantization
         self.uses_classifier_model = False
-        if settings.voice_assistant_reuse_classifier_model:
+        if should_reuse_classifier:
             try:
                 classifier = get_classifier_service()
                 self.torch = classifier.torch
@@ -401,24 +446,67 @@ class BaseQwenAssistantService:
             raise RuntimeError("transformers and torch are required for assistant inference.") from exc
 
         self.torch = torch
-        self.model_name = settings.llm_base_model
+        self.model_name = target_model_name
         self.tokenizer = AutoTokenizer.from_pretrained(
-            settings.llm_base_model,
+            target_model_name,
             trust_remote_code=True,
+        )
+        model_kwargs = self._build_model_load_kwargs(
+            torch,
+            quantization=target_quantization,
         )
         self.model = cast(
             GenerativeModel,
             AutoModelForCausalLM.from_pretrained(
-                settings.llm_base_model,
-                device_map=settings.llm_device,
-                torch_dtype="auto",
+                target_model_name,
                 trust_remote_code=True,
+                **model_kwargs,
             ),
         )
+        if target_quantization != "none":
+            self.model_name = f"{target_model_name} ({target_quantization})"
         self.model.eval()
 
-    def generate_answer(self, question: str, matches: list[KnowledgeMatch]) -> str:
-        messages = self._build_messages(question, matches)
+    @staticmethod
+    def _build_model_load_kwargs(torch_module: Any, *, quantization: str) -> dict[str, Any]:
+        if quantization == "none":
+            return {
+                "device_map": settings.llm_device,
+                "torch_dtype": "auto",
+            }
+
+        if not torch_module.cuda.is_available():
+            raise RuntimeError("Quantized assistant inference requires CUDA/GPU.")
+
+        try:
+            from transformers import BitsAndBytesConfig
+        except ImportError as exc:
+            raise RuntimeError("bitsandbytes is required for quantized assistant inference.") from exc
+
+        if quantization == "8bit":
+            return {
+                "device_map": settings.llm_device,
+                "quantization_config": BitsAndBytesConfig(load_in_8bit=True),
+            }
+        if quantization == "4bit":
+            return {
+                "device_map": settings.llm_device,
+                "quantization_config": BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch_module.float16,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                ),
+            }
+
+        raise RuntimeError(f"Unsupported assistant quantization mode: {quantization}")
+
+    def _generate_from_messages(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_new_tokens: int,
+    ) -> str:
         model_input = apply_classifier_chat_template(
             self.tokenizer,
             messages,
@@ -439,35 +527,155 @@ class BaseQwenAssistantService:
         with self.torch.no_grad(), adapter_context:
             generated = self.model.generate(
                 **inputs,
-                max_new_tokens=settings.voice_assistant_max_new_tokens,
+                max_new_tokens=max_new_tokens,
                 do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
         generated_ids = generated[0][inputs["input_ids"].shape[-1] :]
-        raw = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+        return self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+    def plan_search_queries(self, question: str) -> GuidedSearchPlan:
+        messages = self._build_search_messages(question)
+        raw = self._generate_from_messages(
+            messages,
+            max_new_tokens=160,
+        )
+        queries = self._parse_search_queries(raw, fallback_query=question)
+        return GuidedSearchPlan(queries=queries, raw_response=raw)
+
+    def generate_answer(
+        self,
+        question: str,
+        matches: list[KnowledgeMatch],
+        *,
+        allow_related_sources: bool = False,
+        max_new_tokens: int | None = None,
+        for_phone: bool = False,
+    ) -> str:
+        if for_phone:
+            messages = self._build_phone_answer_messages(question, matches)
+        else:
+            messages = self._build_answer_messages(
+                question,
+                matches,
+                allow_related_sources=allow_related_sources,
+            )
+        raw = self._generate_from_messages(
+            messages,
+            max_new_tokens=max_new_tokens or settings.voice_assistant_max_new_tokens,
+        )
         return self._clean_answer(raw)
 
     @staticmethod
-    def _build_messages(question: str, matches: list[KnowledgeMatch]) -> list[dict[str, str]]:
+    def _extract_json_object(raw: str) -> dict[str, Any]:
+        stripped = raw.strip()
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end == -1 or end < start:
+            raise RuntimeError(f"Model did not return JSON: {raw}")
+        parsed = json.loads(stripped[start : end + 1])
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"Model returned non-object JSON: {raw}")
+        return parsed
+
+    @staticmethod
+    def _parse_search_queries(raw: str, *, fallback_query: str) -> tuple[str, ...]:
+        try:
+            parsed = BaseQwenAssistantService._extract_json_object(raw)
+        except (RuntimeError, json.JSONDecodeError):
+            parsed = {}
+
+        raw_queries = parsed.get("queries")
+        if isinstance(raw_queries, str):
+            query_values = [raw_queries]
+        elif isinstance(raw_queries, list):
+            query_values = [item for item in raw_queries if isinstance(item, str)]
+        else:
+            query_values = []
+
+        normalized_queries: list[str] = []
+        seen: set[str] = set()
+        for query in [*query_values, fallback_query]:
+            normalized = normalize_text(query)[:160]
+            dedupe_key = normalize_for_search(normalized)
+            if len(normalized) < 3 or dedupe_key in seen:
+                continue
+            normalized_queries.append(normalized)
+            seen.add(dedupe_key)
+            if len(normalized_queries) >= settings.voice_assistant_search_query_count:
+                break
+
+        return tuple(normalized_queries or [normalize_text(fallback_query)])
+
+    @staticmethod
+    def _build_search_messages(question: str) -> list[dict[str, str]]:
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "Ти планувальник пошуку для голосової довідкової КПІ. "
+                    "Твоя єдина дія - викликати інструмент search_kpi_faq через JSON. "
+                    "Не відповідай користувачу напряму, не міркуй уголос, не генеруй <think>. "
+                    "Сформуй до кількох коротких українських пошукових запитів, які допоможуть "
+                    "знайти релевантні FAQ-джерела навіть після помилок розпізнавання мовлення."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Питання користувача: {question}\n\n"
+                    "Поверни тільки JSON без Markdown у форматі: "
+                    '{"tool":"search_kpi_faq","queries":["запит 1","запит 2"]}. '
+                    "Запити мають бути короткими, без URL і без вигаданих фактів."
+                ),
+            },
+        ]
+
+    @staticmethod
+    def _build_answer_messages(
+        question: str,
+        matches: list[KnowledgeMatch],
+        *,
+        allow_related_sources: bool,
+    ) -> list[dict[str, str]]:
         context = "\n\n".join(
             (
-                f"Джерело {index}: {match.entry.title}\n"
-                f"URL: {match.entry.source_url}\n"
-                f"Питання FAQ: {match.entry.question}\n"
-                f"Інформація: {match.entry.answer}"
+                f"Тема джерела {index}: {match.entry.title}\n"
+                f"Довідкова інформація для відповіді: {match.entry.answer}"
             )
             for index, match in enumerate(matches, start=1)
+        )
+        freedom_rule = (
+            "Джерела можуть бути лише частково релевантними. Якщо збіг приблизний, прямо скажи, "
+            "що інформація схожа або неповна, і дай обережну відповідь тільки в межах доступних джерел. "
+            "Можеш узагальнювати й пояснювати за аналогією з релевантними фрагментами, але не називай "
+            "точні дедлайни, суми, телефони чи обов'язкові процедури, якщо їх немає в джерелах."
+            if allow_related_sources
+            else (
+                "Відповідай на основі джерел. Можеш природно перефразовувати, поєднувати релевантні "
+                "фрагменти й пояснювати їх простішими словами. Якщо джерела не містять певної деталі, "
+                "чесно скажи, що в наданій інформації цього немає."
+            )
         )
         return [
             {
                 "role": "system",
                 "content": (
                     "Ти голосовий консультант довідкової служби КПІ. "
-                    "Відповідай українською, коротко, доброзичливо і природно для усного мовлення. "
-                    "Не використовуй режим міркування, не генеруй <think> і не пояснюй хід думок. "
-                    "Давай не більше двох коротких речень, щоб відповідь було зручно слухати телефоном. "
-                    "Використовуй тільки надані джерела. "
-                    "Якщо в джерелах недостатньо інформації, скажи, що краще створити заявку."
+                    "Відповідай українською, природно для усного мовлення і тільки з наданих джерел. "
+                    "Одразу починай із відповіді; не повторюй питання, FAQ, заголовки, URL, джерела, "
+                    "заявку чи оператора. Не генеруй <think> і не пояснюй хід думок. "
+                    "Пиши щільно: не обмежуй кількість речень, але кожне речення має додавати "
+                    "новий факт, документ, умову, адресу або дію. Прибирай вступи, оцінки й загальні "
+                    "фрази без нової інформації. "
+                    "Не скорочуй пакети документів: якщо є перелік, двокрапка або пункти через крапку "
+                    "з комою, назви кожен пункт. Якщо спільне слово стосується кількох документів, "
+                    "повтори його для кожного документа. "
+                    "Пиши літературною українською, виправляй русизми, кальки, невдалі відмінки "
+                    "й неприродні формулювання. Використовуй однотипні граматичні форми в переліках. "
+                    f"{freedom_rule} "
+                    "Не вигадуй офіційні правила, контакти, дедлайни, суми або гарантії поза джерелами. "
+                    "Не пропонуй створювати заявку, звернення або передавати питання оператору."
                 ),
             },
             {
@@ -475,8 +683,60 @@ class BaseQwenAssistantService:
                 "content": (
                     f"Питання користувача: {question}\n\n"
                     f"Доступні джерела:\n{context}\n\n"
-                    "Сформуй одну коротку відповідь для озвучення голосом: максимум два речення і приблизно до 450 символів. "
-                    "Не додавай Markdown, URL, списки й службові пояснення."
+                    "Сформуй одну зв'язну змістовну відповідь для озвучення голосом. "
+                    "Почни з конкретної відповіді, без вступної фрази й без загальних міркувань. "
+                    "Без Markdown, URL, списків, службових пояснень і згадок про створення заявки."
+                ),
+            },
+        ]
+
+    @staticmethod
+    def _build_phone_answer_messages(
+        question: str,
+        matches: list[KnowledgeMatch],
+    ) -> list[dict[str, str]]:
+        context = "\n\n".join(
+            f"Факти {index}: {BaseQwenAssistantService._clean_answer(match.entry.answer)}"
+            for index, match in enumerate(matches, start=1)
+        )
+        style_rules = (
+            "Одразу дай відповідь. Не повторюй питання, FAQ, заголовки, джерела, URL, "
+            "заявку чи оператора. Не додавай вступ, підсумок або пояснення без нового факту. "
+            "Не обмежуй кількість речень, але кожне речення має додавати новий факт, документ, "
+            "умову, адресу або дію. Якщо відповідь проста - скажи її коротко; якщо є пакет "
+            "документів - назви всі документи."
+        )
+        completeness_rules = (
+            "Не пропускай документи, корпуси, адреси й умови. Якщо у фактах є перелік, двокрапка "
+            "або пункти через крапку з комою, збережи кожен пункт. Не об'єднуй різні документи. "
+            "Якщо написано 'копія A та B', скажи 'копія A та копія B'. Умови на кшталт "
+            "'якщо немає' пояснюй після основного документа, а не замість нього."
+        )
+        grammar_rules = (
+            "Пиши грамотною українською для озвучення телефоном: 'колишні' замість 'бувші', "
+            "'архіву' замість 'архіва', 'потрібно мати при собі' замість 'при собі мати'. "
+            "Розшифровуй скорочення: 'м.' - 'місто', 'пр.' - 'проспект', 'ім.' - 'імені'. "
+            "У переліках використовуй однотипні граматичні форми."
+        )
+        group_rules = (
+            "Якщо факти мають різні групи людей, не змішуй їх: окремо студенти, окремо випускники "
+            "чи колишні студенти. Не перенось документи або умови з однієї групи на іншу."
+        )
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "Ти телефонний консультант КПІ. Відповідай українською, усно й тільки з фактів. "
+                    f"{style_rules} {completeness_rules} {group_rules} {grammar_rules}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Питання: {question}\n\n"
+                    f"{context}\n\n"
+                    "Сформуй одну зв'язну відповідь для телефонного дзвінка. "
+                    "Без Markdown, маркованих списків і службових пояснень."
                 ),
             },
         ]
@@ -487,51 +747,269 @@ class BaseQwenAssistantService:
         if "</think>" in answer:
             answer = answer.split("</think>", 1)[1].strip()
         answer = answer.strip("` \n\r\t")
+        answer = re.sub(r"\*\*(.*?)\*\*", r"\1", answer)
+        for pattern in ANSWER_INTRO_DROP_PATTERNS:
+            answer = pattern.sub("", answer, count=1)
+        for pattern, replacement in ANSWER_TEXT_REPLACEMENTS:
+            answer = pattern.sub(replacement, answer)
+        if answer and answer[-1] not in ".!?…":
+            complete_answer = re.sub(r"\s+[^.!?…]*$", "", answer)
+            if len(complete_answer) >= 40:
+                answer = complete_answer
         return normalize_text(answer)
+
+
+class OpenAICompatibleAssistantService:
+    def __init__(
+        self,
+        *,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float,
+        temperature: float,
+    ) -> None:
+        self.model_name = f"{model_name} via OpenAI-compatible"
+        self._model_id = model_name
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._timeout_seconds = timeout_seconds
+        self._temperature = temperature
+
+    def _generate_from_messages(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_new_tokens: int,
+    ) -> str:
+        try:
+            import httpx
+        except ImportError as exc:
+            raise RuntimeError("httpx is required for OpenAI-compatible inference.") from exc
+
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        payload = {
+            "model": self._model_id,
+            "messages": messages,
+            "max_tokens": max_new_tokens,
+            "temperature": self._temperature,
+            "stream": False,
+        }
+
+        try:
+            response = httpx.post(
+                f"{self._base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self._timeout_seconds,
+            )
+            response.raise_for_status()
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+        except (httpx.HTTPError, KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("OpenAI-compatible assistant inference failed.") from exc
+
+        if not isinstance(content, str):
+            raise RuntimeError("OpenAI-compatible assistant returned non-text content.")
+        return content
+
+    def plan_search_queries(self, question: str) -> GuidedSearchPlan:
+        messages = BaseQwenAssistantService._build_search_messages(question)
+        raw = self._generate_from_messages(
+            messages,
+            max_new_tokens=160,
+        )
+        queries = BaseQwenAssistantService._parse_search_queries(raw, fallback_query=question)
+        return GuidedSearchPlan(queries=queries, raw_response=raw)
+
+    def generate_answer(
+        self,
+        question: str,
+        matches: list[KnowledgeMatch],
+        *,
+        allow_related_sources: bool = False,
+        max_new_tokens: int | None = None,
+        for_phone: bool = False,
+    ) -> str:
+        if for_phone:
+            messages = BaseQwenAssistantService._build_phone_answer_messages(question, matches)
+        else:
+            messages = BaseQwenAssistantService._build_answer_messages(
+                question,
+                matches,
+                allow_related_sources=allow_related_sources,
+            )
+        raw = self._generate_from_messages(
+            messages,
+            max_new_tokens=max_new_tokens or settings.voice_assistant_max_new_tokens,
+        )
+        return BaseQwenAssistantService._clean_answer(raw)
+
+
+AssistantService = BaseQwenAssistantService | OpenAICompatibleAssistantService
 
 
 class VoiceAssistantService:
     def __init__(self) -> None:
         self.knowledge_base = KnowledgeBaseService()
 
-    async def answer(self, question_text: str) -> VoiceAssistantResponse:
+    async def answer(self, question_text: str, *, for_phone: bool = False) -> VoiceAssistantResponse:
         question = normalize_text(question_text)
-        return await asyncio.to_thread(self._answer_sync, question)
+        return await asyncio.to_thread(self._answer_sync, question, for_phone=for_phone)
 
-    def _answer_sync(self, question: str) -> VoiceAssistantResponse:
-        matches = self.knowledge_base.search(question)
-        if not self._has_reliable_match(matches):
+    def _answer_sync(self, question: str, *, for_phone: bool = False) -> VoiceAssistantResponse:
+        direct_matches = self.knowledge_base.search(question)
+        matches = direct_matches
+        guided_retrieval_used = False
+        llm: AssistantService | None = None
+        llm_enabled = settings.voice_assistant_use_llm and (
+            settings.voice_assistant_phone_use_llm if for_phone else True
+        )
+        guided_retrieval_enabled = (
+            settings.voice_assistant_phone_ai_guided_retrieval
+            if for_phone
+            else settings.voice_assistant_ai_guided_retrieval
+        )
+
+        if llm_enabled and guided_retrieval_enabled:
+            try:
+                llm = (
+                    get_phone_qwen_assistant_service()
+                    if for_phone
+                    else get_base_qwen_assistant_service()
+                )
+                search_plan = llm.plan_search_queries(question)
+                guided_matches = self._search_with_guided_queries(
+                    question,
+                    search_plan.queries,
+                )
+                if self._best_score(guided_matches) >= self._best_score(direct_matches):
+                    matches = guided_matches
+                    guided_retrieval_used = True
+            except RuntimeError:
+                logger.exception("Voice assistant guided retrieval failed.")
+
+        reliable_match = self._has_reliable_match(matches)
+        soft_match = self._has_soft_match(matches)
+        if not reliable_match and not (llm_enabled and soft_match):
             return self._fallback_response(question)
 
-        best_score = matches[0].score
+        best_score = matches[0].score if matches else 0
+        context_matches = self._filter_context_matches(
+            matches,
+            reliable_match=reliable_match,
+        )
+        if for_phone:
+            context_matches = context_matches[: settings.voice_assistant_phone_max_context_items]
         used_llm = False
         model_name: str | None = None
         answer_text = ""
-        if settings.voice_assistant_use_llm:
+
+        if llm_enabled:
             try:
-                llm = get_base_qwen_assistant_service()
-                answer_text = llm.generate_answer(question, matches)
+                if llm is None:
+                    llm = (
+                        get_phone_qwen_assistant_service()
+                        if for_phone
+                        else get_base_qwen_assistant_service()
+                    )
+                generation_kwargs: dict[str, Any] = {
+                    "allow_related_sources": not reliable_match,
+                }
+                if for_phone:
+                    if settings.voice_assistant_phone_max_new_tokens > 0:
+                        generation_kwargs["max_new_tokens"] = (
+                            settings.voice_assistant_phone_max_new_tokens
+                        )
+                    generation_kwargs["for_phone"] = True
+                answer_text = llm.generate_answer(question, context_matches, **generation_kwargs)
                 used_llm = bool(answer_text)
                 model_name = llm.model_name if used_llm else None
             except RuntimeError:
                 logger.exception("Voice assistant LLM generation failed.")
-                return self._llm_unavailable_response(question, matches)
+                if for_phone:
+                    answer_text = self._extractive_answer(context_matches[0].entry)
+                else:
+                    return self._llm_unavailable_response(question, context_matches)
 
         if not answer_text:
-            if settings.voice_assistant_use_llm:
-                return self._llm_unavailable_response(question, matches)
-            answer_text = self._extractive_answer(matches[0].entry)
+            if llm_enabled:
+                return self._llm_unavailable_response(question, context_matches)
+            answer_text = self._extractive_answer(context_matches[0].entry)
+
+        if used_llm and guided_retrieval_used:
+            source = "llm_guided"
+        elif used_llm:
+            source = "llm"
+        else:
+            source = "knowledge_base"
 
         return VoiceAssistantResponse(
             question_text=question,
             answer_text=answer_text,
             confidence=best_score,
-            source="llm" if used_llm else "knowledge_base",
-            sources=self._sources(matches),
-            can_create_ticket=True,
+            source=source,
+            sources=self._sources(context_matches),
+            can_create_ticket=False,
             used_llm=used_llm,
             model_name=model_name,
         )
+
+    def _search_with_guided_queries(
+        self,
+        question: str,
+        queries: tuple[str, ...],
+    ) -> list[KnowledgeMatch]:
+        groups = [
+            self.knowledge_base.search(query, limit=settings.voice_assistant_search_candidates)
+            for query in (*queries, question)
+        ]
+        return self._merge_matches(groups, limit=settings.voice_assistant_max_context_items)
+
+    @staticmethod
+    def _merge_matches(
+        groups: list[list[KnowledgeMatch]],
+        *,
+        limit: int,
+    ) -> list[KnowledgeMatch]:
+        best_by_entry: dict[str, KnowledgeMatch] = {}
+        for group in groups:
+            for match in group:
+                existing = best_by_entry.get(match.entry.id)
+                if existing is None or match.score > existing.score:
+                    best_by_entry[match.entry.id] = match
+
+        matches = list(best_by_entry.values())
+        matches.sort(key=lambda item: item.score, reverse=True)
+        return matches[:limit]
+
+    @staticmethod
+    def _best_score(matches: list[KnowledgeMatch]) -> float:
+        return matches[0].score if matches else 0.0
+
+    @staticmethod
+    def _filter_context_matches(
+        matches: list[KnowledgeMatch],
+        *,
+        reliable_match: bool,
+    ) -> list[KnowledgeMatch]:
+        if not matches:
+            return []
+
+        top_score = matches[0].score
+        absolute_floor = (
+            settings.voice_assistant_min_confidence
+            if reliable_match
+            else settings.voice_assistant_soft_min_confidence
+        )
+        min_score = max(
+            absolute_floor,
+            top_score * settings.voice_assistant_context_score_ratio,
+        )
+        filtered = [match for match in matches if match.score >= min_score]
+        return filtered[: settings.voice_assistant_max_context_items] or matches[:1]
 
     @staticmethod
     def _has_reliable_match(matches: list[KnowledgeMatch]) -> bool:
@@ -541,10 +1019,15 @@ class VoiceAssistantService:
         return best_score >= settings.voice_assistant_min_confidence
 
     @staticmethod
+    def _has_soft_match(matches: list[KnowledgeMatch]) -> bool:
+        if not matches:
+            return False
+        best_score = matches[0].score
+        return best_score >= settings.voice_assistant_soft_min_confidence
+
+    @staticmethod
     def _extractive_answer(entry: KnowledgeBaseEntry) -> str:
-        return normalize_text(
-            f"{entry.answer} Якщо потрібно, можу створити заявку оператору для уточнення."
-        )
+        return BaseQwenAssistantService._clean_answer(entry.answer)
 
     @staticmethod
     def _sources(matches: list[KnowledgeMatch]) -> list[VoiceAssistantSource]:
@@ -562,12 +1045,12 @@ class VoiceAssistantService:
             question_text=question,
             answer_text=(
                 "Я не знайшов точну відповідь в офіційній базі знань КПІ. "
-                "Можу створити заявку оператору, щоб ваше питання розглянули вручну."
+                "Спробуйте переформулювати питання або додати більше деталей."
             ),
             confidence=0,
             source="fallback",
             sources=[],
-            can_create_ticket=True,
+            can_create_ticket=False,
             used_llm=False,
             model_name=None,
         )
@@ -581,12 +1064,12 @@ class VoiceAssistantService:
             question_text=question,
             answer_text=(
                 "ШІ-модель зараз не змогла сформувати автоматичну відповідь. "
-                "Можу створити заявку оператору, щоб ваше питання розглянули вручну."
+                "Спробуйте повторити питання трохи пізніше або уточнити формулювання."
             ),
             confidence=matches[0].score if matches else 0,
             source="llm_unavailable",
             sources=self._sources(matches),
-            can_create_ticket=True,
+            can_create_ticket=False,
             used_llm=False,
             model_name=None,
         )
@@ -598,8 +1081,33 @@ def get_knowledge_base_service() -> KnowledgeBaseService:
 
 
 @lru_cache
-def get_base_qwen_assistant_service() -> BaseQwenAssistantService:
+def get_base_qwen_assistant_service() -> AssistantService:
+    if settings.voice_assistant_inference_engine == "openai_compatible":
+        return OpenAICompatibleAssistantService(
+            model_name=settings.voice_assistant_model,
+            base_url=settings.voice_assistant_openai_base_url,
+            api_key=settings.voice_assistant_openai_api_key,
+            timeout_seconds=settings.voice_assistant_openai_timeout_seconds,
+            temperature=settings.voice_assistant_openai_temperature,
+        )
     return BaseQwenAssistantService()
+
+
+@lru_cache
+def get_phone_qwen_assistant_service() -> AssistantService:
+    if settings.voice_assistant_phone_inference_engine == "openai_compatible":
+        return OpenAICompatibleAssistantService(
+            model_name=settings.voice_assistant_phone_model,
+            base_url=settings.voice_assistant_phone_openai_base_url,
+            api_key=settings.voice_assistant_phone_openai_api_key,
+            timeout_seconds=settings.voice_assistant_phone_openai_timeout_seconds,
+            temperature=settings.voice_assistant_phone_openai_temperature,
+        )
+    return BaseQwenAssistantService(
+        model_name=settings.voice_assistant_phone_model,
+        reuse_classifier_model=settings.voice_assistant_phone_reuse_classifier_model,
+        quantization=settings.voice_assistant_phone_quantization,
+    )
 
 
 @lru_cache

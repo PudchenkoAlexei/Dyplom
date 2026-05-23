@@ -51,7 +51,11 @@ function Wait-HttpOk($Url, $TimeoutSeconds) {
 }
 
 function Wait-DockerReady {
-    docker info *> $null
+    try {
+        docker info *> $null
+    } catch {
+        $global:LASTEXITCODE = 1
+    }
     if ($LASTEXITCODE -eq 0) {
         return
     }
@@ -66,7 +70,11 @@ function Wait-DockerReady {
 
     $deadline = (Get-Date).AddMinutes(3)
     while ((Get-Date) -lt $deadline) {
-        docker info *> $null
+        try {
+            docker info *> $null
+        } catch {
+            $global:LASTEXITCODE = 1
+        }
         if ($LASTEXITCODE -eq 0) {
             return
         }

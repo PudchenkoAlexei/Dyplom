@@ -6,12 +6,12 @@ $RootDir = Split-Path -Parent $ScriptDir
 Set-Location $RootDir
 
 Write-Host "Ports:" -ForegroundColor Cyan
-$ports = Get-NetTCPConnection -LocalPort 3000,8000,8088,5432 -ErrorAction SilentlyContinue |
+$ports = Get-NetTCPConnection -LocalPort 3000,8000,8080,8088,5432 -ErrorAction SilentlyContinue |
     Select-Object LocalAddress, LocalPort, State, OwningProcess
 if ($ports) {
     $ports | Format-Table -AutoSize
 } else {
-    Write-Host "  No listeners on 3000, 8000, 8088 or 5432."
+    Write-Host "  No listeners on 3000, 8000, 8080, 8088 or 5432."
 }
 
 $udpPorts = Get-NetUDPEndpoint -LocalPort 5060 -ErrorAction SilentlyContinue |
@@ -25,7 +25,14 @@ if ($udpPorts) {
 Write-Host ""
 Write-Host "Docker:" -ForegroundColor Cyan
 if (Get-Command docker -ErrorAction SilentlyContinue) {
-    docker ps --filter "name=kpi-helpdesk" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    try {
+        docker ps --filter "name=kpi-helpdesk" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Docker is not responding."
+        }
+    } catch {
+        Write-Host "  Docker is not responding."
+    }
 } else {
     Write-Host "  Docker CLI not found."
 }
@@ -44,4 +51,12 @@ try {
     Write-Host "  Frontend: OK ($($response.StatusCode))" -ForegroundColor Green
 } catch {
     Write-Host "  Frontend: not responding"
+}
+
+try {
+    $models = Invoke-RestMethod -Uri "http://127.0.0.1:8080/v1/models" -TimeoutSec 3
+    $modelId = $models.data[0].id
+    Write-Host "  Llama:    OK ($modelId)" -ForegroundColor Green
+} catch {
+    Write-Host "  Llama:    not responding"
 }

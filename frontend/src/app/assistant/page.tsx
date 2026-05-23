@@ -235,15 +235,17 @@ function VoiceAssistantWorkspace() {
                     label="Повторити голосом"
                     text={response.answer_text}
                   />
-                  <button
-                    className="secondary-button"
-                    disabled={creatingTicket}
-                    onClick={createTicketFromQuestion}
-                    type="button"
-                  >
-                    <TicketPlus size={18} />
-                    {creatingTicket ? "Створення..." : "Заявка оператору"}
-                  </button>
+                  {response.can_create_ticket && (
+                    <button
+                      className="secondary-button"
+                      disabled={creatingTicket}
+                      onClick={createTicketFromQuestion}
+                      type="button"
+                    >
+                      <TicketPlus size={18} />
+                      {creatingTicket ? "Створення..." : "Заявка оператору"}
+                    </button>
+                  )}
                 </div>
 
                 {createdTicketId && (

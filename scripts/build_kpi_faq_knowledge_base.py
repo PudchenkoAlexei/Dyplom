@@ -60,6 +60,8 @@ TAG_STOP_WORDS = {
     "який",
 }
 
+INLINE_FAQ_QUESTION_RE = re.compile(r"(^|(?<=[.!;:])\s+)([^.!?;:/]{3,120}\?)\s*")
+
 
 @dataclass(frozen=True)
 class Link:
@@ -76,11 +78,18 @@ class FaqPage:
 
 
 def clean_text(value: str) -> str:
-    return re.sub(r"\s+", " ", unescape(value)).strip()
+    cleaned = re.sub(r"\s+", " ", unescape(value).replace("🔗", "")).strip()
+    return re.sub(r"\s+-\s*$", "", cleaned).strip()
+
+
+def strip_inline_faq_questions(value: str) -> str:
+    return INLINE_FAQ_QUESTION_RE.sub(lambda match: match.group(1), value)
 
 
 def trim_answer(value: str, max_chars: int) -> str:
     cleaned = clean_text(value)
+    if max_chars <= 0:
+        return cleaned
     if len(cleaned) <= max_chars:
         return cleaned
 
@@ -143,11 +152,13 @@ class ArticleExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.title = ""
+        self.detailed_question = ""
         self.blocks: list[tuple[str, str]] = []
         self._skip_depth = 0
+        self._detail_depth = 0
+        self._body_depth = 0
         self._current_tag: str | None = None
         self._chunks: list[str] = []
-        self._collecting = False
         self._stopped = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -156,7 +167,20 @@ class ArticleExtractor(HTMLParser):
             return
         if self._skip_depth or self._stopped:
             return
-        if tag in {"h1", "h2", "h3", "p", "li"}:
+
+        attrs_map = dict(attrs)
+        class_names = set((attrs_map.get("class") or "").split())
+        if "field--name-field-detailed-question" in class_names:
+            self._detail_depth = 1
+        elif self._detail_depth:
+            self._detail_depth += 1
+
+        if "field--name-body" in class_names:
+            self._body_depth = 1
+        elif self._body_depth:
+            self._body_depth += 1
+
+        if tag == "h1" or ((self._detail_depth or self._body_depth) and tag in {"h2", "h3", "p", "li"}):
             self._current_tag = tag
             self._chunks = []
 
@@ -169,21 +193,32 @@ class ArticleExtractor(HTMLParser):
         if tag in {"script", "style", "header", "nav", "footer", "aside"} and self._skip_depth:
             self._skip_depth -= 1
             return
-        if self._current_tag != tag or self._stopped:
+        if self._stopped:
+            if self._detail_depth:
+                self._detail_depth -= 1
+            if self._body_depth:
+                self._body_depth -= 1
             return
 
-        text = clean_text(" ".join(self._chunks))
-        if tag == "h1" and text:
-            self.title = text
-            self._collecting = True
-        elif self._collecting and text:
-            if tag in {"h2", "h3"} and any(text.startswith(heading) for heading in STOP_HEADINGS):
-                self._stopped = True
-            else:
-                self.blocks.append((tag, text))
+        if self._current_tag == tag:
+            text = clean_text(" ".join(self._chunks))
+            if tag == "h1" and text:
+                self.title = text
+            elif self._detail_depth and text:
+                self.detailed_question = clean_text(f"{self.detailed_question} {text}")
+            elif self._body_depth and text:
+                if tag in {"h2", "h3"} and any(text.startswith(heading) for heading in STOP_HEADINGS):
+                    self._stopped = True
+                else:
+                    self.blocks.append((tag, text))
 
-        self._current_tag = None
-        self._chunks = []
+            self._current_tag = None
+            self._chunks = []
+
+        if self._detail_depth:
+            self._detail_depth -= 1
+        if self._body_depth:
+            self._body_depth -= 1
 
 
 def faq_links(index_html: str, base_url: str) -> list[Link]:
@@ -220,7 +255,7 @@ def extract_page(html: str, url: str, fallback_title: str, *, max_answer_chars: 
     parser.feed(html)
 
     title = parser.title or fallback_title
-    question = ""
+    question = parser.detailed_question
     answer_blocks: list[str] = []
 
     for tag, text in parser.blocks:
@@ -228,16 +263,18 @@ def extract_page(html: str, url: str, fallback_title: str, *, max_answer_chars: 
             continue
         if re.fullmatch(r"\d{2}-\d{2}-\d{4}", text):
             continue
-        if not question and text.endswith("?"):
-            question = text
-            continue
-        if tag == "li" and len(text) < 20:
+        if text.endswith("?"):
+            if not question:
+                question = text
             continue
         if len(text) < 12:
             continue
         answer_blocks.append(text)
 
-    answer = trim_answer(" ".join(answer_blocks), max_answer_chars)
+    answer = trim_answer(
+        strip_inline_faq_questions(" ".join(answer_blocks)),
+        max_answer_chars,
+    )
     if not answer:
         return None
     return FaqPage(title=title, question=question or title, answer=answer, url=url)
@@ -328,7 +365,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--request-delay", type=float, default=0.4)
-    parser.add_argument("--max-answer-chars", type=int, default=1200)
+    parser.add_argument("--max-answer-chars", type=int, default=0)
     args = parser.parse_args()
 
     entries, skipped = build_knowledge_base(

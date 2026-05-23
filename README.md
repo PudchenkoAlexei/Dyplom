@@ -155,6 +155,54 @@ LLM_BASE_MODEL=Qwen/Qwen3-1.7B
 LORA_ADAPTER_PATH=ml/models/qwen3-kpi-lora
 ```
 
+Голосова довідкова може працювати в AI-guided retrieval режимі: модель спершу формує
+пошукові запити для інструмента `search_kpi_faq`, backend виконує пошук у локальній
+FAQ-базі, після чого модель формує відповідь на основі знайдених джерел.
+Для генерації відповідей вона може використовувати окрему сильнішу instruct-модель,
+не змінюючи базову модель LoRA-класифікатора.
+
+```text
+VOICE_ASSISTANT_MODEL=Qwen/Qwen3-4B-Instruct-2507
+VOICE_ASSISTANT_INFERENCE_ENGINE=transformers
+VOICE_ASSISTANT_REUSE_CLASSIFIER_MODEL=false
+VOICE_ASSISTANT_AI_GUIDED_RETRIEVAL=true
+VOICE_ASSISTANT_SEARCH_QUERY_COUNT=3
+VOICE_ASSISTANT_SEARCH_CANDIDATES=8
+VOICE_ASSISTANT_MIN_CONFIDENCE=0.5
+VOICE_ASSISTANT_SOFT_MIN_CONFIDENCE=0.32
+VOICE_ASSISTANT_MAX_CONTEXT_ITEMS=5
+VOICE_ASSISTANT_CONTEXT_SCORE_RATIO=0.65
+VOICE_ASSISTANT_MAX_NEW_TOKENS=900
+VOICE_ASSISTANT_TTS_MAX_CHARS=0
+```
+
+`VOICE_ASSISTANT_TTS_MAX_CHARS=0` вимикає обрізання тексту перед озвученням.
+
+Для телефонної довідки можна винести генерацію з backend-процесу в окремий
+OpenAI-compatible inference server, наприклад `llama-server` з `llama.cpp`:
+
+```text
+VOICE_ASSISTANT_PHONE_INFERENCE_ENGINE=openai_compatible
+VOICE_ASSISTANT_PHONE_MODEL=Qwen/Qwen3-4B-GGUF:Q4_K_M
+VOICE_ASSISTANT_PHONE_OPENAI_BASE_URL=http://127.0.0.1:8080/v1
+VOICE_ASSISTANT_PHONE_OPENAI_API_KEY=local
+VOICE_ASSISTANT_PHONE_WARMUP_ON_STARTUP=false
+```
+
+Після встановлення `llama.cpp` і появи `llama-server` у `PATH` можна запустити
+локальний сервер моделі:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_llama_cpp.ps1
+```
+
+Скрипт за замовчуванням стартує `Qwen/Qwen3-4B-GGUF:Q4_K_M` на
+`http://127.0.0.1:8080/v1`. Зупинка:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\stop_llama_cpp.ps1
+```
+
 Навчальні файли:
 
 ```text

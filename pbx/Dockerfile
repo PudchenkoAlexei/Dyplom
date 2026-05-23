@@ -23,6 +23,11 @@ COPY pbx/scripts/kpi_record_question.py /usr/local/bin/kpi_record_question.py
 COPY pbx/scripts/asterisk_entrypoint.sh /usr/local/bin/kpi_asterisk_entrypoint.sh
 
 RUN mkdir -p /opt/kpi-asterisk/sounds \
+    && sed -i 's/\r$//' \
+        /usr/local/bin/kpi_audio_has_speech.py \
+        /usr/local/bin/kpi_phone_assistant.py \
+        /usr/local/bin/kpi_record_question.py \
+        /usr/local/bin/kpi_asterisk_entrypoint.sh \
     && ffmpeg -hide_banner -loglevel error -y \
         -f lavfi -i sine=frequency=880:duration=0.25 \
         -ar 8000 -ac 1 -sample_fmt s16 /opt/kpi-asterisk/sounds/beep.wav \

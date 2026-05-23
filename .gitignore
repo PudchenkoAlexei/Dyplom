@@ -14,6 +14,7 @@ dist/
 build/
 *.log
 .run/
+tools/
 backend/storage/audio/*
 !backend/storage/audio/.gitkeep
 backend/backend/
