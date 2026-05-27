@@ -1,5 +1,6 @@
 param(
     [string]$Model = "Qwen/Qwen3-4B-GGUF:Q4_K_M",
+    [string]$Alias = "",
     [string]$HostName = "127.0.0.1",
     [int]$Port = 8080,
     [int]$ContextTokens = 8192,
@@ -32,8 +33,23 @@ if ($existingListener) {
     exit 0
 }
 
-$arguments = @(
-    "-hf", $Model,
+$resolvedModelPath = $null
+if (Test-Path -LiteralPath $Model) {
+    $resolvedModelPath = (Resolve-Path -LiteralPath $Model).Path
+}
+
+$arguments = @()
+if ($resolvedModelPath) {
+    $arguments += @("-m", $resolvedModelPath)
+} else {
+    $arguments += @("-hf", $Model)
+}
+
+if ($Alias) {
+    $arguments += @("-a", $Alias)
+}
+
+$arguments += @(
     "--host", $HostName,
     "--port", [string]$Port,
     "--jinja",

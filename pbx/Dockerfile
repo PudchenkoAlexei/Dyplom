@@ -20,6 +20,7 @@ COPY pbx/assets/welcome.wav /opt/kpi-asterisk/sounds/welcome.wav
 COPY pbx/scripts/kpi_audio_has_speech.py /usr/local/bin/kpi_audio_has_speech.py
 COPY pbx/scripts/kpi_phone_assistant.py /usr/local/bin/kpi_phone_assistant.py
 COPY pbx/scripts/kpi_record_question.py /usr/local/bin/kpi_record_question.py
+COPY pbx/scripts/kpi_wait_for_file.py /usr/local/bin/kpi_wait_for_file.py
 COPY pbx/scripts/asterisk_entrypoint.sh /usr/local/bin/kpi_asterisk_entrypoint.sh
 
 RUN mkdir -p /opt/kpi-asterisk/sounds \
@@ -27,6 +28,7 @@ RUN mkdir -p /opt/kpi-asterisk/sounds \
         /usr/local/bin/kpi_audio_has_speech.py \
         /usr/local/bin/kpi_phone_assistant.py \
         /usr/local/bin/kpi_record_question.py \
+        /usr/local/bin/kpi_wait_for_file.py \
         /usr/local/bin/kpi_asterisk_entrypoint.sh \
     && ffmpeg -hide_banner -loglevel error -y \
         -f lavfi -i sine=frequency=880:duration=0.25 \
@@ -37,6 +39,7 @@ RUN mkdir -p /opt/kpi-asterisk/sounds \
     && chmod +x /usr/local/bin/kpi_audio_has_speech.py \
     && chmod +x /usr/local/bin/kpi_phone_assistant.py \
     && chmod +x /usr/local/bin/kpi_record_question.py \
+    && chmod +x /usr/local/bin/kpi_wait_for_file.py \
     && chmod +x /usr/local/bin/kpi_asterisk_entrypoint.sh \
     && mkdir -p \
         /var/lib/asterisk/sounds/kpi/responses \

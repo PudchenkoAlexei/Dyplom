@@ -11,7 +11,7 @@ settings = get_settings()
 
 KPI_SPOKEN = "\u043a\u0430 \u043f\u0435 \u0456"
 TTS_REPLACEMENTS = (
-    (re.compile(r"\b(?:\u041a\u041f\u0406|KPI)\b", re.IGNORECASE), KPI_SPOKEN),
+    (re.compile(r"\b(?:\u041a\u041f[\u0406I\u0407]|KPI)\b", re.IGNORECASE), KPI_SPOKEN),
     (re.compile(r"\b\u041d\u0422\u0423\u0423\b", re.IGNORECASE), "\u0435\u043d \u0442\u0435 \u0443 \u0443"),
     (
         re.compile(r"\b\u0428\u0406-\u043c\u043e\u0434\u0435\u043b\w*\b", re.IGNORECASE),
@@ -23,9 +23,17 @@ TTS_REPLACEMENTS = (
     ),
     (re.compile(r"\bFAQ\b", re.IGNORECASE), "\u043f\u043e\u0448\u0438\u0440\u0435\u043d\u0438\u0445 \u043f\u0438\u0442\u0430\u043d\u044c"),
     (re.compile(r"\bURL\b", re.IGNORECASE), "\u043f\u043e\u0441\u0438\u043b\u0430\u043d\u043d\u044f"),
+    (
+        re.compile(r"\b\u0443\s+\u0417\u0412\u041e\b", re.IGNORECASE),
+        "\u0443 \u0437\u0430\u043a\u043b\u0430\u0434\u0456 \u0432\u0438\u0449\u043e\u0457 \u043e\u0441\u0432\u0456\u0442\u0438",
+    ),
+    (
+        re.compile(r"\b\u0434\u043e\s+\u0417\u0412\u041e\b", re.IGNORECASE),
+        "\u0434\u043e \u0437\u0430\u043a\u043b\u0430\u0434\u0443 \u0432\u0438\u0449\u043e\u0457 \u043e\u0441\u0432\u0456\u0442\u0438",
+    ),
     (re.compile(r"\b\u0417\u0412\u041e\b", re.IGNORECASE), "\u0437\u0430\u043a\u043b\u0430\u0434 \u0432\u0438\u0449\u043e\u0457 \u043e\u0441\u0432\u0456\u0442\u0438"),
     (re.compile(r"\b\u0412\u041d\u0417\b", re.IGNORECASE), "\u0432\u0438\u0449\u0438\u0439 \u043d\u0430\u0432\u0447\u0430\u043b\u044c\u043d\u0438\u0439 \u0437\u0430\u043a\u043b\u0430\u0434"),
-    (re.compile(r"\b\u0456\u043c\.", re.IGNORECASE), "\u0456\u043c\u0435\u043d\u0456"),
+    (re.compile(r"\b\u0456\u043c\.\s*", re.IGNORECASE), "\u0456\u043c\u0435\u043d\u0456 "),
     (re.compile(r"\b\u043f\u0440\.", re.IGNORECASE), "\u043f\u0440\u043e\u0441\u043f\u0435\u043a\u0442"),
     (re.compile(r"\b\u043c\.", re.IGNORECASE), "\u043c\u0456\u0441\u0442\u043e"),
     (re.compile(r"\b\u0432\u0443\u043b\.", re.IGNORECASE), "\u0432\u0443\u043b\u0438\u0446\u044f"),
@@ -33,6 +41,27 @@ TTS_REPLACEMENTS = (
     (re.compile(r"\u2116\s*", re.IGNORECASE), "\u043d\u043e\u043c\u0435\u0440 "),
     (re.compile(r"\bemail\b|\be-mail\b", re.IGNORECASE), "\u0435\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u043d\u0430 \u043f\u043e\u0448\u0442\u0430"),
     (re.compile(r"\b\u0442\u0435\u043b\./\u0444\u0430\u043a\u0441\b", re.IGNORECASE), "\u0442\u0435\u043b\u0435\u0444\u043e\u043d \u0456 \u0444\u0430\u043a\u0441"),
+    (re.compile(r"\b\u0442\u0435\u043b\.", re.IGNORECASE), "\u0442\u0435\u043b\u0435\u0444\u043e\u043d"),
+)
+DIGIT_WORDS = {
+    "0": "\u043d\u0443\u043b\u044c",
+    "1": "\u043e\u0434\u0438\u043d",
+    "2": "\u0434\u0432\u0430",
+    "3": "\u0442\u0440\u0438",
+    "4": "\u0447\u043e\u0442\u0438\u0440\u0438",
+    "5": "\u043f'\u044f\u0442\u044c",
+    "6": "\u0448\u0456\u0441\u0442\u044c",
+    "7": "\u0441\u0456\u043c",
+    "8": "\u0432\u0456\u0441\u0456\u043c",
+    "9": "\u0434\u0435\u0432'\u044f\u0442\u044c",
+}
+POSTAL_CODE_AFTER_ADDRESS_RE = re.compile(
+    r"(\b\u0430\u0434\u0440\u0435\u0441\u0430\s*:\s*)(\d{5,6})(?=\s*,)",
+    re.IGNORECASE,
+)
+POSTAL_CODE_AFTER_INDEX_RE = re.compile(
+    r"(\b(?:\u043f\u043e\u0448\u0442\u043e\u0432\w*\s+)?\u0456\u043d\u0434\u0435\u043a\u0441\w*\s*:?\s*)(\d{5,6})\b",
+    re.IGNORECASE,
 )
 SPEECH_PAUSE_CLAUSE = re.compile(r";\s*")
 SPEECH_PAUSE_COLON = re.compile(r"(?<!\d):(?!\d)\s*")
@@ -50,6 +79,18 @@ def add_punctuation_pauses(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", speech_text).strip()
 
 
+def _spell_digits_for_speech(value: str) -> str:
+    return " ".join(DIGIT_WORDS.get(char, char) for char in value)
+
+
+def expand_postal_codes_for_speech(text: str) -> str:
+    def replace_with_spoken_digits(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{_spell_digits_for_speech(match.group(2))}"
+
+    speech_text = POSTAL_CODE_AFTER_ADDRESS_RE.sub(replace_with_spoken_digits, text)
+    return POSTAL_CODE_AFTER_INDEX_RE.sub(replace_with_spoken_digits, speech_text)
+
+
 def prepare_text_for_speech(text: str) -> str:
     speech_text = normalize_text(text)
     for pattern, replacement in TTS_REPLACEMENTS:
@@ -61,6 +102,7 @@ def prepare_text_for_speech(text: str) -> str:
         speech_text,
         flags=re.IGNORECASE,
     )
+    speech_text = expand_postal_codes_for_speech(speech_text)
     return add_punctuation_pauses(normalize_text(speech_text))
 
 

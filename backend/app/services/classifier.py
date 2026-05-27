@@ -60,6 +60,41 @@ class TicketClassifierService:
     FALLBACK_CATEGORY = "інше"
     CATEGORY_ALIASES = {"інше / первинна маршрутизація": FALLBACK_CATEGORY}
 
+    @staticmethod
+    def _build_model_load_kwargs(torch_module: Any, *, quantization: str) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "device_map": settings.llm_device,
+            "trust_remote_code": True,
+        }
+        if quantization == "none":
+            kwargs["torch_dtype"] = "auto"
+            return kwargs
+
+        try:
+            from transformers import BitsAndBytesConfig
+        except ImportError as exc:
+            raise RuntimeError(
+                "bitsandbytes quantized classifier loading requires transformers."
+            ) from exc
+
+        compute_dtype = (
+            torch_module.bfloat16
+            if torch_module.cuda.is_available() and torch_module.cuda.is_bf16_supported()
+            else torch_module.float16
+        )
+        if quantization == "4bit":
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=compute_dtype,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+            )
+        elif quantization == "8bit":
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise RuntimeError(f"Unsupported classifier quantization: {quantization}")
+        return kwargs
+
     def __init__(self) -> None:
         adapter_path = Path(settings.lora_adapter_path)
         if not adapter_path.exists():
@@ -84,9 +119,10 @@ class TicketClassifierService:
         )
         base_model = AutoModelForCausalLM.from_pretrained(
             settings.llm_base_model,
-            device_map=settings.llm_device,
-            torch_dtype="auto",
-            trust_remote_code=True,
+            **self._build_model_load_kwargs(
+                torch,
+                quantization=settings.classifier_quantization,
+            ),
         )
         self.model = PeftModel.from_pretrained(base_model, str(adapter_path))
         self.model.eval()

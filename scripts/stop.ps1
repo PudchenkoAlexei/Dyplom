@@ -36,6 +36,11 @@ Stop-PidFile "frontend"
 Stop-PortListener 8000
 Stop-PortListener 3000
 
+$stopLlamaScript = Join-Path $ScriptDir "stop_llama_cpp.ps1"
+if (Test-Path -LiteralPath $stopLlamaScript) {
+    & $stopLlamaScript
+}
+
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     docker compose down
 }

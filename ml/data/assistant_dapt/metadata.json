@@ -1,0 +1,24 @@
+{
+  "knowledge_base": "backend\\app\\data\\kpi_faq_knowledge_base.json",
+  "entries": 62,
+  "source_split_counts": {
+    "test": 6,
+    "train": 50,
+    "validation": 6
+  },
+  "records": 189,
+  "record_split_counts": {
+    "test": 18,
+    "train": 153,
+    "validation": 18
+  },
+  "record_kind_counts": {
+    "official_source_card": 63,
+    "retrieval_topic_card": 63,
+    "voice_answer_example": 63
+  },
+  "characters": 185347,
+  "rough_token_estimate": 51485,
+  "seed": 42,
+  "max_answer_chars": 2600
+}

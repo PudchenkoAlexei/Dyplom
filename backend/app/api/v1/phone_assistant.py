@@ -5,13 +5,14 @@ from time import perf_counter
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.phone import PhoneAssistantCall
-from app.schemas.phone_assistant import PhoneAssistantResponse
-from app.schemas.voice_assistant import VoiceAssistantResponse
+from app.schemas.phone_assistant import PhoneAssistantResponse, PhoneAssistantTextResponse
+from app.schemas.voice_assistant import VoiceAssistantResponse, VoiceAssistantSpeechRequest
 from app.services.storage import save_ticket_audio
 from app.services.stt import get_stt_service
 from app.services.tts import get_tts_service
@@ -43,14 +44,13 @@ def _unrecognized_question_response(question: str) -> VoiceAssistantResponse:
     )
 
 
-@router.post("/ask", response_model=PhoneAssistantResponse)
-async def ask_phone_assistant(
-    call_id: str = Form(..., min_length=1, max_length=160),
-    caller_number: str | None = Form(default=None, max_length=80),
-    audio: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_pbx_token),
-) -> PhoneAssistantResponse:
+async def _answer_phone_question(
+    *,
+    call_id: str,
+    caller_number: str | None,
+    audio: UploadFile,
+    db: AsyncSession,
+) -> tuple[VoiceAssistantResponse, float, float, float, float, float]:
     started_at = perf_counter()
     stored_audio = await save_ticket_audio(uuid4(), audio)
     audio_saved_at = perf_counter()
@@ -63,9 +63,6 @@ async def ask_phone_assistant(
     else:
         assistant_response = _unrecognized_question_response(question)
     answered_at = perf_counter()
-
-    tts_result = await get_tts_service().synthesize(assistant_response.answer_text)
-    synthesized_at = perf_counter()
     source_rows = [source.model_dump(mode="json") for source in assistant_response.sources]
 
     db.add(
@@ -86,6 +83,34 @@ async def ask_phone_assistant(
     )
     await db.commit()
     committed_at = perf_counter()
+    return assistant_response, started_at, audio_saved_at, transcribed_at, answered_at, committed_at
+
+
+@router.post("/ask", response_model=PhoneAssistantResponse)
+async def ask_phone_assistant(
+    call_id: str = Form(..., min_length=1, max_length=160),
+    caller_number: str | None = Form(default=None, max_length=80),
+    audio: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_pbx_token),
+) -> PhoneAssistantResponse:
+    (
+        assistant_response,
+        started_at,
+        audio_saved_at,
+        transcribed_at,
+        answered_at,
+        committed_at,
+    ) = await _answer_phone_question(
+        call_id=call_id,
+        caller_number=caller_number,
+        audio=audio,
+        db=db,
+    )
+
+    tts_started_at = perf_counter()
+    tts_result = await get_tts_service().synthesize(assistant_response.answer_text)
+    synthesized_at = perf_counter()
 
     logger.info(
         "phone assistant call %s timing: save=%.2fs stt=%.2fs answer=%.2fs tts=%.2fs db=%.2fs total=%.2fs",
@@ -93,9 +118,9 @@ async def ask_phone_assistant(
         audio_saved_at - started_at,
         transcribed_at - audio_saved_at,
         answered_at - transcribed_at,
-        synthesized_at - answered_at,
-        committed_at - synthesized_at,
-        committed_at - started_at,
+        synthesized_at - tts_started_at,
+        committed_at - answered_at,
+        synthesized_at - started_at,
     )
 
     return PhoneAssistantResponse(
@@ -110,4 +135,62 @@ async def ask_phone_assistant(
         model_name=assistant_response.model_name,
         answer_audio_mime_type=tts_result.mime_type,
         answer_audio_base64=base64.b64encode(tts_result.audio).decode("ascii"),
+    )
+
+
+@router.post("/ask-text", response_model=PhoneAssistantTextResponse)
+async def ask_phone_assistant_text(
+    call_id: str = Form(..., min_length=1, max_length=160),
+    caller_number: str | None = Form(default=None, max_length=80),
+    audio: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_pbx_token),
+) -> PhoneAssistantTextResponse:
+    (
+        assistant_response,
+        started_at,
+        audio_saved_at,
+        transcribed_at,
+        answered_at,
+        committed_at,
+    ) = await _answer_phone_question(
+        call_id=call_id,
+        caller_number=caller_number,
+        audio=audio,
+        db=db,
+    )
+
+    logger.info(
+        "phone assistant call %s text timing: save=%.2fs stt=%.2fs answer=%.2fs db=%.2fs total=%.2fs",
+        call_id,
+        audio_saved_at - started_at,
+        transcribed_at - audio_saved_at,
+        answered_at - transcribed_at,
+        committed_at - answered_at,
+        committed_at - started_at,
+    )
+
+    return PhoneAssistantTextResponse(
+        call_id=call_id,
+        caller_number=normalize_text(caller_number or "") or None,
+        question_text=assistant_response.question_text,
+        answer_text=assistant_response.answer_text,
+        confidence=assistant_response.confidence,
+        source=assistant_response.source,
+        sources=assistant_response.sources,
+        used_llm=assistant_response.used_llm,
+        model_name=assistant_response.model_name,
+    )
+
+
+@router.post("/speech")
+async def synthesize_phone_assistant_speech(
+    payload: VoiceAssistantSpeechRequest,
+    _: None = Depends(require_pbx_token),
+) -> Response:
+    result = await get_tts_service().synthesize(payload.text)
+    return Response(
+        content=result.audio,
+        media_type=result.mime_type,
+        headers={"X-TTS-Voice": result.voice},
     )

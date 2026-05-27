@@ -18,7 +18,7 @@ class CatalogItem:
 CategoryItem = CatalogItem | Mapping[str, str | None] | str
 
 
-def shorten_text(text: str, max_chars: int = 320) -> str:
+def shorten_text(text: str, max_chars: int = 260) -> str:
     cleaned = " ".join(text.split())
     if len(cleaned) <= max_chars:
         return cleaned
@@ -49,7 +49,7 @@ def category_guide(category_items: Sequence[CategoryItem]) -> str:
         name = category_name(item)
         description = category_description(item)
         if description:
-            parts.append(f"{name} ({shorten_text(description, max_chars=28)})")
+            parts.append(f"{name} ({shorten_text(description, max_chars=20)})")
         else:
             parts.append(name)
     return "; ".join(parts)
@@ -57,17 +57,17 @@ def category_guide(category_items: Sequence[CategoryItem]) -> str:
 
 def routing_hints() -> str:
     return (
-        "вступні заяви/кабінет вступника/бюджет чи контракт до зарахування -> вступ; "
-        "диплом/дублікат/апостиль/документи випускника -> документи про освіту; "
-        "поновлення/переведення після зарахування/відрахування -> переведення / поновлення / відрахування; "
+        "вступ/кабінет вступника -> вступ; "
+        "диплом/дублікат/апостиль -> документи про освіту; "
+        "поновлення/переведення/відрахування -> переведення / поновлення / відрахування; "
         "розклад/залік/оцінка/сесія -> навчальний процес; "
-        "довідка/печатка/деканат -> деканат / довідки студентів; "
-        "Erasmus/обмін/кредити за кордоном -> академічна мобільність; "
-        "посвідка/ДМС/іноземний студент -> міжнародні студенти; "
-        "логін/пошта/VPN/Moodle/Wi-Fi -> мережа / пошта / інтернет; "
-        "особистий кабінет Електронного кампусу -> Електронний кампус; "
-        "Scopus/книги/абонемент бібліотеки -> бібліотека; "
-        "перепустка/доступ/охорона/інцидент -> безпека / перепустки."
+        "довідка/печатка -> деканат / довідки студентів; "
+        "Erasmus/обмін -> академічна мобільність; "
+        "посвідка/ДМС -> міжнародні студенти; "
+        "пошта/VPN/Moodle/Wi-Fi -> мережа / пошта / інтернет; "
+        "ecampus -> Електронний кампус; "
+        "книги/Scopus -> бібліотека; "
+        "перепустка/охорона -> безпека / перепустки."
     )
 
 

@@ -57,11 +57,16 @@ class Settings(BaseSettings):
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
     whisper_beam_size: int = Field(default=1, ge=1, le=5)
+    whisper_temperature: float = Field(default=0.0, ge=0, le=1)
+    whisper_domain_hints_enabled: bool = True
+    whisper_domain_terms_max: int = Field(default=160, ge=0, le=500)
+    whisper_transcription_corrections_enabled: bool = True
     stt_warmup_on_startup: bool = True
 
-    llm_base_model: str = "Qwen/Qwen3-1.7B"
-    lora_adapter_path: Path = PROJECT_ROOT / "ml/models/qwen3-kpi-lora"
+    llm_base_model: str = "Qwen/Qwen3-4B-Instruct-2507"
+    lora_adapter_path: Path = PROJECT_ROOT / "ml/models/qwen3-kpi-lora-4b"
     llm_device: str = "auto"
+    classifier_quantization: Literal["none", "8bit", "4bit"] = "4bit"
     classifier_max_new_tokens: int = 128
     classifier_warmup_on_startup: bool = True
     voice_assistant_use_llm: bool = True
@@ -81,8 +86,8 @@ class Settings(BaseSettings):
     voice_assistant_phone_inference_engine: Literal[
         "transformers", "openai_compatible"
     ] = "transformers"
-    voice_assistant_phone_model: str = "Qwen/Qwen3-1.7B"
-    voice_assistant_phone_reuse_classifier_model: bool = True
+    voice_assistant_phone_model: str = "Qwen/Qwen3-4B-Instruct-2507"
+    voice_assistant_phone_reuse_classifier_model: bool = False
     voice_assistant_phone_quantization: Literal["none", "8bit", "4bit"] = "none"
     voice_assistant_phone_openai_base_url: str = "http://127.0.0.1:8080/v1"
     voice_assistant_phone_openai_api_key: str = ""

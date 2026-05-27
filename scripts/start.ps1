@@ -1,7 +1,16 @@
 param(
     [switch]$SkipInstall,
     [switch]$SkipPbx,
-    [switch]$NoOpen
+    [switch]$SkipLlama,
+    [switch]$NoOpen,
+    [string]$LlamaModel = "Qwen/Qwen3-4B-GGUF:Q4_K_M",
+    [string]$LlamaAlias = "Qwen3-4B-KPI-Assistant-Q4_K_M",
+    [int]$LlamaPort = 8080,
+    [int]$LlamaContextTokens = 8192,
+    [int]$LlamaPredictTokens = 1200,
+    [int]$LlamaGpuLayers = 99,
+    [int]$LlamaThreads = 0,
+    [switch]$LlamaFlashAttention
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,6 +50,22 @@ function Wait-HttpOk($Url, $TimeoutSeconds) {
         try {
             $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
             if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+                return $true
+            }
+        } catch {
+            Start-Sleep -Seconds 2
+        }
+    }
+    return $false
+}
+
+function Wait-LlamaReady($Port, $TimeoutSeconds) {
+    $url = "http://127.0.0.1:$Port/v1/models"
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $response = Invoke-RestMethod -Uri $url -TimeoutSec 3
+            if ($response.data -or $response.object -eq "list") {
                 return $true
             }
         } catch {
@@ -152,7 +177,7 @@ function Start-Backend($PythonExe) {
     $env:PYTHONDONTWRITEBYTECODE = "1"
     $process = Start-Process `
         -FilePath $PythonExe `
-        -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000") `
+        -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000") `
         -WorkingDirectory $BackendDir `
         -WindowStyle Hidden `
         -RedirectStandardOutput $BackendLog `
@@ -164,13 +189,35 @@ function Start-Backend($PythonExe) {
 function Start-Frontend {
     $process = Start-Process `
         -FilePath "npm.cmd" `
-        -ArgumentList @("run", "dev", "--", "--hostname", "127.0.0.1", "--port", "3000") `
+        -ArgumentList @("run", "dev", "--", "--hostname", "0.0.0.0", "--port", "3000") `
         -WorkingDirectory $FrontendDir `
         -WindowStyle Hidden `
         -RedirectStandardOutput $FrontendLog `
         -RedirectStandardError $FrontendErr `
         -PassThru
     Set-Content -Path (Join-Path $RunDir "frontend.pid") -Value $process.Id
+}
+
+function Start-LlamaServer {
+    $scriptPath = Join-Path $ScriptDir "start_llama_cpp.ps1"
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        throw "start_llama_cpp.ps1 was not found."
+    }
+
+    $arguments = @{
+        Model = $LlamaModel
+        Alias = $LlamaAlias
+        Port = $LlamaPort
+        ContextTokens = $LlamaContextTokens
+        PredictTokens = $LlamaPredictTokens
+        GpuLayers = $LlamaGpuLayers
+        Threads = $LlamaThreads
+    }
+    if ($LlamaFlashAttention) {
+        $arguments["FlashAttention"] = $true
+    }
+
+    & $scriptPath @arguments
 }
 
 Set-Location $RootDir
@@ -229,6 +276,15 @@ try {
     Pop-Location
 }
 
+if (-not $SkipLlama) {
+    Write-Step "Starting local LLM inference"
+    Start-LlamaServer
+    $llamaReady = Wait-LlamaReady $LlamaPort 180
+    if (-not $llamaReady) {
+        Write-Host "llama-server did not answer in time. See .run\llama-server.err.log" -ForegroundColor Yellow
+    }
+}
+
 Write-Step "Starting backend and frontend"
 Start-Backend $PythonExe
 Start-Frontend
@@ -248,6 +304,9 @@ Write-Host "Site:     http://127.0.0.1:3000/login" -ForegroundColor Green
 Write-Host "API:      http://127.0.0.1:8000/health" -ForegroundColor Green
 if (-not $SkipPbx) {
     Write-Host "PBX:      SIP 127.0.0.1:5060, WebRTC ws://127.0.0.1:8088/ws, call 7000" -ForegroundColor Green
+}
+if (-not $SkipLlama) {
+    Write-Host "LLM:      http://127.0.0.1:$LlamaPort/v1 ($LlamaAlias)" -ForegroundColor Green
 }
 Write-Host ""
 Write-Host "Users:"

@@ -6,7 +6,7 @@ import sys
 import torch
 import yaml
 from datasets import Dataset
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
@@ -51,6 +51,37 @@ def read_catalog_items(path: Path) -> list[CatalogItem]:
         CatalogItem(name=name, description=descriptions.get(name, department))
         for name, department in catalog["categories"].items()
     ]
+
+
+def model_load_kwargs(config: dict) -> dict:
+    quantization = str(config.get("quantization", "none"))
+    kwargs: dict = {
+        "device_map": "auto",
+        "trust_remote_code": True,
+    }
+    if quantization == "none":
+        kwargs["torch_dtype"] = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        return kwargs
+
+    from transformers import BitsAndBytesConfig
+
+    compute_dtype = (
+        torch.bfloat16
+        if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+        else torch.float16
+    )
+    if quantization == "4bit":
+        kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
+    elif quantization == "8bit":
+        kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+    else:
+        raise ValueError(f"Unsupported quantization: {quantization}")
+    return kwargs
 
 
 def main() -> None:
@@ -124,10 +155,10 @@ def main() -> None:
 
     model = AutoModelForCausalLM.from_pretrained(
         config["base_model"],
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto",
-        trust_remote_code=True,
+        **model_load_kwargs(config),
     )
+    if str(config.get("quantization", "none")) in {"4bit", "8bit"}:
+        model = prepare_model_for_kbit_training(model)
     if torch.cuda.is_available() and config.get("gradient_checkpointing", True):
         model.config.use_cache = False
         model.gradient_checkpointing_enable()
@@ -147,19 +178,20 @@ def main() -> None:
         num_train_epochs=float(config["num_train_epochs"]),
         learning_rate=float(config["learning_rate"]),
         per_device_train_batch_size=int(config["per_device_train_batch_size"]),
-        per_device_eval_batch_size=1,
+        per_device_eval_batch_size=int(config.get("per_device_eval_batch_size", 1)),
         gradient_accumulation_steps=int(config["gradient_accumulation_steps"]),
         warmup_ratio=float(config["warmup_ratio"]),
         weight_decay=float(config["weight_decay"]),
         logging_steps=int(config["logging_steps"]),
         save_steps=int(config["save_steps"]),
         eval_strategy="steps",
-        eval_steps=int(config["save_steps"]),
-        save_total_limit=3,
+        eval_steps=int(config.get("eval_steps", config["save_steps"])),
+        save_total_limit=int(config.get("save_total_limit", 2)),
         load_best_model_at_end=bool(config.get("load_best_model_at_end", True)),
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        bf16=torch.cuda.is_available(),
+        bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        optim=str(config.get("optim", "adamw_torch")),
         report_to="none",
     )
 

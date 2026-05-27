@@ -51,6 +51,37 @@ install_sklearn_stub()
 from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: E402
 
 
+def model_load_kwargs(config: dict) -> dict:
+    quantization = str(config.get("quantization", "none"))
+    kwargs: dict = {
+        "device_map": "auto",
+        "trust_remote_code": True,
+    }
+    if quantization == "none":
+        kwargs["torch_dtype"] = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        return kwargs
+
+    from transformers import BitsAndBytesConfig
+
+    compute_dtype = (
+        torch.bfloat16
+        if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+        else torch.float16
+    )
+    if quantization == "4bit":
+        kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
+    elif quantization == "8bit":
+        kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+    else:
+        raise ValueError(f"Unsupported quantization: {quantization}")
+    return kwargs
+
+
 SMOKE_QUERIES = [
     # (text, expected_category, expected_priority, note)
     ("Чи можу я очікувати додаткову академічну стипендію за наукову роботу?", "стипендія", "medium", "процедура"),
@@ -109,9 +140,7 @@ def main() -> None:
     print("Loading base model...", flush=True)
     base = AutoModelForCausalLM.from_pretrained(
         config["base_model"],
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto",
-        trust_remote_code=True,
+        **model_load_kwargs(config),
     )
     print("Loading PEFT adapter...", flush=True)
     model = PeftModel.from_pretrained(base, config["output_dir"])

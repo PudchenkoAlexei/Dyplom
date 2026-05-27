@@ -25,6 +25,18 @@ def test_classifier_chat_template_disables_thinking() -> None:
     assert tokenizer.kwargs["enable_thinking"] is False
 
 
+def test_classifier_quantized_model_load_kwargs_use_bitsandbytes_config() -> None:
+    import torch
+
+    if not torch.cuda.is_available():
+        return
+
+    kwargs = TicketClassifierService._build_model_load_kwargs(torch, quantization="4bit")
+
+    assert kwargs["device_map"] == "auto"
+    assert kwargs["quantization_config"].load_in_4bit is True
+
+
 def test_classifier_json_extraction() -> None:
     raw = '```json\n{"category":"стипендія","priority":"medium"}\n```'
 

@@ -4,8 +4,9 @@ import { Mic, MicOff, Phone, PhoneCall, PhoneOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { SimpleUser, type SimpleUserDelegate, type SimpleUserOptions } from "sip.js/lib/platform/web";
 
-const PBX_WS_URL = process.env.NEXT_PUBLIC_PBX_WS_URL ?? "ws://127.0.0.1:8088/ws";
-const PBX_SIP_DOMAIN = process.env.NEXT_PUBLIC_PBX_SIP_DOMAIN ?? "127.0.0.1";
+const browserHost = typeof window === "undefined" ? "127.0.0.1" : window.location.hostname;
+const PBX_WS_URL = process.env.NEXT_PUBLIC_PBX_WS_URL ?? `ws://${browserHost}:8088/ws`;
+const PBX_SIP_DOMAIN = process.env.NEXT_PUBLIC_PBX_SIP_DOMAIN ?? browserHost;
 const PBX_WEBRTC_EXTENSION = process.env.NEXT_PUBLIC_PBX_WEBRTC_EXTENSION ?? "7002";
 const PBX_WEBRTC_PASSWORD = process.env.NEXT_PUBLIC_PBX_WEBRTC_PASSWORD ?? "KpiWebPhone7002!";
 const PBX_ASSISTANT_NUMBER = process.env.NEXT_PUBLIC_PBX_ASSISTANT_NUMBER ?? "7000";

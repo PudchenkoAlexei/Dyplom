@@ -1,4 +1,11 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
+function defaultApiBaseUrl(): string {
+  if (typeof window === "undefined") {
+    return "http://127.0.0.1:8000/api/v1";
+  }
+  return `http://${window.location.hostname}:8000/api/v1`;
+}
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? defaultApiBaseUrl();
 
 export class ApiError extends Error {
   status: number;
