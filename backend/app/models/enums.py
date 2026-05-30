@@ -24,6 +24,12 @@ class Priority(StrEnum):
     high = "high"
 
 
+class KnowledgeEntryStatus(StrEnum):
+    draft = "draft"
+    published = "published"
+    archived = "archived"
+
+
 class TicketEventType(StrEnum):
     created = "created"
     audio_uploaded = "audio_uploaded"

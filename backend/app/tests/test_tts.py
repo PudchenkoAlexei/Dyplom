@@ -53,17 +53,17 @@ def test_add_punctuation_pauses_keeps_dates_and_times_intact() -> None:
 
 
 def test_add_punctuation_pauses_keeps_short_comma_clauses_inline() -> None:
-    speech_text = add_punctuation_pauses("РџР°СЃРїРѕСЂС‚, РєРѕРїС–СЏ РїР°СЃРїРѕСЂС‚Р°, Р·Р°СЏРІР°.")
+    speech_text = add_punctuation_pauses("Паспорт, копія паспорта, заява.")
 
-    assert speech_text == "РџР°СЃРїРѕСЂС‚, РєРѕРїС–СЏ РїР°СЃРїРѕСЂС‚Р°, Р·Р°СЏРІР°."
+    assert speech_text == "Паспорт, копія паспорта, заява."
 
 
 def test_add_punctuation_pauses_breaks_after_comma_before_long_clause() -> None:
     speech_text = add_punctuation_pauses(
-        "Р—Р°СЏРІР°, РєРѕРїС–СЏ РїР°СЃРїРѕСЂС‚Р° РіСЂРѕРјР°РґСЏРЅРёРЅР° РЈРєСЂР°С—РЅРё С‚Р° РїР°СЃРїРѕСЂС‚Р° РґР»СЏ РІРёС—Р·РґСѓ Р·Р° РєРѕСЂРґРѕРЅ."
+        "Заява, копія паспорта громадянина України та паспорта для виїзду за кордон."
     )
 
-    assert "Р—Р°СЏРІР°,\nРєРѕРїС–СЏ РїР°СЃРїРѕСЂС‚Р°" in speech_text
+    assert "Заява,\nкопія паспорта" in speech_text
 
 
 def test_prepare_text_for_speech_expands_phone_unfriendly_abbreviations() -> None:
@@ -133,8 +133,8 @@ def test_synthesize_calls_tts_for_repeated_text(monkeypatch) -> None:
     monkeypatch.setattr("app.services.tts.settings.voice_assistant_tts_enabled", True)
 
     service = TextToSpeechService()
-    first = asyncio.run(service.synthesize("Р”РѕРІС–РґРєСѓ РІРёРґР°С” РґРµРєР°РЅР°С‚."))
-    second = asyncio.run(service.synthesize("Р”РѕРІС–РґРєСѓ РІРёРґР°С” РґРµРєР°РЅР°С‚."))
+    first = asyncio.run(service.synthesize("Довідку видає деканат."))
+    second = asyncio.run(service.synthesize("Довідку видає деканат."))
 
     assert calls["count"] == 2
     assert first.audio == b"audio"

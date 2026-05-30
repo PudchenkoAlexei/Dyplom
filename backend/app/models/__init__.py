@@ -1,7 +1,14 @@
 from app.models.auth import RefreshToken
 from app.models.category import Category
 from app.models.department import Department
-from app.models.enums import Priority, TicketEventType, TicketStatus, UserRole
+from app.models.enums import (
+    KnowledgeEntryStatus,
+    Priority,
+    TicketEventType,
+    TicketStatus,
+    UserRole,
+)
+from app.models.knowledge import KnowledgeEntry
 from app.models.model import ModelPrediction, ModelVersion
 from app.models.phone import PhoneAssistantCall
 from app.models.ticket import Ticket, TicketAudio, TicketEvent, TicketMessage, TicketTranscript
@@ -10,6 +17,8 @@ from app.models.user import User
 __all__ = [
     "Category",
     "Department",
+    "KnowledgeEntry",
+    "KnowledgeEntryStatus",
     "ModelPrediction",
     "ModelVersion",
     "PhoneAssistantCall",

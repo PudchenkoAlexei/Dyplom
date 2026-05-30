@@ -11,6 +11,7 @@ from app.models.model import ModelPrediction
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.security.passwords import hash_password
+from app.services.knowledge_base_admin import seed_knowledge_base_from_json
 
 
 DEPARTMENTS = [
@@ -330,6 +331,7 @@ async def seed_catalog() -> None:
                     )
                 )
 
+        await seed_knowledge_base_from_json(db)
         await db.commit()
 
 

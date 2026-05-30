@@ -2,7 +2,9 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import get_db
 from app.models.user import User
 from app.schemas.voice_assistant import VoiceAssistantResponse, VoiceAssistantSpeechRequest
 from app.security.deps import get_profile_ready_requester
@@ -18,6 +20,7 @@ router = APIRouter(prefix="/voice-assistant", tags=["voice assistant"])
 async def ask_voice_assistant(
     question_text: str | None = Form(default=None, min_length=3, max_length=12000),
     audio: UploadFile | None = File(default=None),
+    db: AsyncSession = Depends(get_db),
     _: User = Depends(get_profile_ready_requester),
 ) -> VoiceAssistantResponse:
     question = normalize_text(question_text or "")
@@ -41,7 +44,7 @@ async def ask_voice_assistant(
             detail="Question text is too short.",
         )
 
-    return await get_voice_assistant_service().answer(question)
+    return await get_voice_assistant_service().answer(question, db=db)
 
 
 @router.post("/speech")

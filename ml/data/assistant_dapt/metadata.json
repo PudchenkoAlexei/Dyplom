@@ -17,8 +17,8 @@
     "retrieval_topic_card": 63,
     "voice_answer_example": 63
   },
-  "characters": 185347,
-  "rough_token_estimate": 51485,
+  "characters": 176932,
+  "rough_token_estimate": 49148,
   "seed": 42,
   "max_answer_chars": 2600
 }

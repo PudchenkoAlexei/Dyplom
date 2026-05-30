@@ -597,7 +597,7 @@ def test_voice_assistant_does_not_offer_ticket_when_llm_is_unavailable(monkeypat
 
     response = service._answer_sync("Де дізнатись про академічну мобільність?")
 
-    assert response.source == "llm_unavailable"
+    assert response.source == "knowledge_base"
     assert response.can_create_ticket is False
     assert "заяв" not in response.answer_text.lower()
 
@@ -664,6 +664,23 @@ def test_guided_retrieval_lets_model_drive_faq_search(monkeypatch) -> None:
     assert response.used_llm is True
     assert response.model_name == "fake-qwen"
     assert response.sources
+
+
+def test_voice_assistant_uses_knowledge_base_when_llm_load_fails(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.voice_assistant.settings.voice_assistant_use_llm", True)
+    monkeypatch.setattr("app.services.voice_assistant.settings.voice_assistant_ai_guided_retrieval", True)
+    monkeypatch.setattr(
+        "app.services.voice_assistant.get_base_qwen_assistant_service",
+        lambda: (_ for _ in ()).throw(RuntimeError("no local model")),
+    )
+    service = VoiceAssistantService()
+
+    response = service._answer_sync("Де дізнатись про академічну мобільність?")
+
+    assert response.source == "knowledge_base"
+    assert response.used_llm is False
+    assert response.sources
+    assert response.answer_text
 
 
 def test_phone_mode_skips_guided_retrieval_and_can_disable_phone_token_limit(

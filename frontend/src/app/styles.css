@@ -401,6 +401,15 @@ a {
   overflow-wrap: anywhere;
 }
 
+.ticket-description {
+  display: -webkit-box;
+  line-clamp: 3;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -797,6 +806,53 @@ a {
   overflow-wrap: anywhere;
 }
 
+.knowledge-filters {
+  grid-template-columns: minmax(180px, 220px) minmax(260px, 360px);
+}
+
+.knowledge-grid {
+  grid-template-columns: minmax(380px, 0.9fr) minmax(520px, 1.1fr);
+}
+
+.knowledge-search {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.knowledge-search input {
+  border: 0;
+  color: var(--ink);
+  min-width: 0;
+  outline: 0;
+  width: 100%;
+}
+
+.knowledge-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.knowledge-editor textarea {
+  min-height: 130px;
+}
+
+.knowledge-meta-strip {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 10px 16px;
+  padding-top: 14px;
+}
+
 .error-box {
   background: #fff1f0;
   border: 1px solid #f2beb9;
@@ -937,6 +993,11 @@ a {
   }
 
   .filters-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-grid,
+  .knowledge-filters {
     grid-template-columns: 1fr;
   }
 

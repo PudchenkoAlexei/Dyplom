@@ -1,4 +1,4 @@
-import type { Priority, TicketStatus, UserRole } from "@/types/domain";
+import type { KnowledgeEntryStatus, Priority, TicketStatus, UserRole } from "@/types/domain";
 
 export const roleLabel: Record<UserRole, string> = {
   student: "Студент",
@@ -21,4 +21,10 @@ export const priorityLabel: Record<Priority, string> = {
   low: "Низький",
   medium: "Середній",
   high: "Високий",
+};
+
+export const knowledgeStatusLabel: Record<KnowledgeEntryStatus, string> = {
+  draft: "Чернетка",
+  published: "Опубліковано",
+  archived: "Архів",
 };

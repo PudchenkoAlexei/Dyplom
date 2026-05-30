@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+import hashlib
 import json
 import logging
 import math
@@ -14,7 +15,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import get_settings
+from app.models.enums import KnowledgeEntryStatus
+from app.models.knowledge import KnowledgeEntry
 from app.schemas.voice_assistant import VoiceAssistantResponse, VoiceAssistantSource
 from app.services.classifier import get_classifier_service, install_sklearn_stub
 from app.services.classifier_prompt import apply_classifier_chat_template
@@ -23,6 +29,7 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 KNOWLEDGE_BASE_PATH = Path(__file__).resolve().parents[1] / "data" / "kpi_faq_knowledge_base.json"
+_DATABASE_KNOWLEDGE_BASE_CACHE: dict[str, "KnowledgeBaseService"] = {}
 TOKEN_RE = re.compile(r"[0-9a-zа-щьюяґєії']{2,}", re.IGNORECASE)
 NON_TOKEN_RE = re.compile(r"[^0-9a-zа-щьюяґєії]+", re.IGNORECASE)
 STOP_WORDS = {
@@ -890,6 +897,15 @@ class KnowledgeBaseService:
         self._index_by_entry_id = {item.entry.id: item for item in self._index}
         self._idf = self._build_idf(self._index)
 
+    @classmethod
+    def from_entries(cls, entries: list[KnowledgeBaseEntry]) -> "KnowledgeBaseService":
+        service = cls.__new__(cls)
+        service.entries = entries
+        service._index = [service._build_index(entry) for entry in entries]
+        service._index_by_entry_id = {item.entry.id: item for item in service._index}
+        service._idf = service._build_idf(service._index)
+        return service
+
     @staticmethod
     def _build_index(entry: KnowledgeBaseEntry) -> EntrySearchIndex:
         fields = field_tokens(entry)
@@ -1224,22 +1240,25 @@ class BaseQwenAssistantService:
 
         self.torch = torch
         self.model_name = target_model_name
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            target_model_name,
-            trust_remote_code=True,
-        )
-        model_kwargs = self._build_model_load_kwargs(
-            torch,
-            quantization=target_quantization,
-        )
-        self.model = cast(
-            GenerativeModel,
-            AutoModelForCausalLM.from_pretrained(
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
                 target_model_name,
                 trust_remote_code=True,
-                **model_kwargs,
-            ),
-        )
+            )
+            model_kwargs = self._build_model_load_kwargs(
+                torch,
+                quantization=target_quantization,
+            )
+            self.model = cast(
+                GenerativeModel,
+                AutoModelForCausalLM.from_pretrained(
+                    target_model_name,
+                    trust_remote_code=True,
+                    **model_kwargs,
+                ),
+            )
+        except Exception as exc:
+            raise RuntimeError("Could not load assistant generation model.") from exc
         if target_quantization != "none":
             self.model_name = f"{target_model_name} ({target_quantization})"
         self.model.eval()
@@ -1652,6 +1671,50 @@ class OpenAICompatibleAssistantService:
 AssistantService = BaseQwenAssistantService | OpenAICompatibleAssistantService
 
 
+async def load_published_knowledge_base(db: AsyncSession) -> KnowledgeBaseService | None:
+    result = await db.execute(
+        select(KnowledgeEntry)
+        .where(KnowledgeEntry.status == KnowledgeEntryStatus.published)
+        .order_by(KnowledgeEntry.title)
+    )
+    rows = list(result.scalars())
+    if not rows:
+        return None
+
+    version_payload = [
+        (
+            str(row.id),
+            row.content_hash,
+            row.updated_at.isoformat() if row.updated_at else "",
+        )
+        for row in rows
+    ]
+    version_key = hashlib.sha256(
+        json.dumps(version_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    cached = _DATABASE_KNOWLEDGE_BASE_CACHE.get(version_key)
+    if cached is not None:
+        return cached
+
+    service = KnowledgeBaseService.from_entries(
+        [
+            KnowledgeBaseEntry(
+                id=row.slug or str(row.id),
+                title=row.title,
+                question=row.question,
+                answer=row.answer,
+                source_url=row.source_url,
+                tags=tuple(str(tag) for tag in row.tags_json or []),
+            )
+            for row in rows
+        ]
+    )
+    if len(_DATABASE_KNOWLEDGE_BASE_CACHE) >= 4:
+        _DATABASE_KNOWLEDGE_BASE_CACHE.clear()
+    _DATABASE_KNOWLEDGE_BASE_CACHE[version_key] = service
+    return service
+
+
 class VoiceAssistantService:
     def __init__(self) -> None:
         self.knowledge_base = KnowledgeBaseService()
@@ -1682,14 +1745,39 @@ class VoiceAssistantService:
             return "У наданій офіційній інформації електронну пошту не вказано."
         return ""
 
-    async def answer(self, question_text: str, *, for_phone: bool = False) -> VoiceAssistantResponse:
+    async def answer(
+        self,
+        question_text: str,
+        *,
+        for_phone: bool = False,
+        db: AsyncSession | None = None,
+    ) -> VoiceAssistantResponse:
         question = normalize_text(question_text)
-        return await asyncio.to_thread(self._answer_sync, question, for_phone=for_phone)
+        knowledge_base: KnowledgeBaseService | None = None
+        if db is not None:
+            try:
+                knowledge_base = await load_published_knowledge_base(db)
+            except Exception:
+                logger.exception("Failed to load published knowledge base from database.")
+        return await asyncio.to_thread(
+            self._answer_sync,
+            question,
+            for_phone=for_phone,
+            knowledge_base=knowledge_base,
+        )
 
-    def _answer_sync(self, question: str, *, for_phone: bool = False) -> VoiceAssistantResponse:
-        direct_matches = self.knowledge_base.search(question)
+    def _answer_sync(
+        self,
+        question: str,
+        *,
+        for_phone: bool = False,
+        knowledge_base: KnowledgeBaseService | None = None,
+    ) -> VoiceAssistantResponse:
+        active_knowledge_base = knowledge_base or self.knowledge_base
+        direct_matches = active_knowledge_base.search(question)
         matches = direct_matches
         guided_retrieval_used = False
+        llm_unavailable = False
         llm: AssistantService | None = None
         llm_enabled = settings.voice_assistant_use_llm and (
             settings.voice_assistant_phone_use_llm if for_phone else True
@@ -1711,12 +1799,19 @@ class VoiceAssistantService:
                 guided_matches = self._search_with_guided_queries(
                     question,
                     search_plan.queries,
+                    active_knowledge_base,
                 )
-                if self._should_accept_guided_matches(question, direct_matches, guided_matches):
+                if self._should_accept_guided_matches(
+                    question,
+                    direct_matches,
+                    guided_matches,
+                    active_knowledge_base,
+                ):
                     matches = guided_matches
                     guided_retrieval_used = True
-            except RuntimeError:
+            except Exception:
                 logger.exception("Voice assistant guided retrieval failed.")
+                llm_unavailable = True
 
         reliable_match = self._has_reliable_match(matches)
         soft_match = self._has_soft_match(matches)
@@ -1772,7 +1867,7 @@ class VoiceAssistantService:
         model_name: str | None = None
         answer_text = ""
 
-        if llm_enabled:
+        if llm_enabled and not llm_unavailable:
             try:
                 if llm is None:
                     llm = (
@@ -1792,17 +1887,18 @@ class VoiceAssistantService:
                 answer_text = llm.generate_answer(question, context_matches, **generation_kwargs)
                 used_llm = bool(answer_text)
                 model_name = llm.model_name if used_llm else None
-            except RuntimeError:
+            except Exception:
                 logger.exception("Voice assistant LLM generation failed.")
-                if for_phone:
+                if context_matches:
                     answer_text = self._extractive_answer(context_matches[0].entry)
-                else:
+                elif llm_enabled:
                     return self._llm_unavailable_response(question, context_matches)
 
         if not answer_text:
-            if llm_enabled:
+            if context_matches:
+                answer_text = self._extractive_answer(context_matches[0].entry)
+            elif llm_enabled:
                 return self._llm_unavailable_response(question, context_matches)
-            answer_text = self._extractive_answer(context_matches[0].entry)
 
         if used_llm and guided_retrieval_used:
             source = "llm_guided"
@@ -1826,9 +1922,10 @@ class VoiceAssistantService:
         self,
         question: str,
         queries: tuple[str, ...],
+        knowledge_base: KnowledgeBaseService,
     ) -> list[KnowledgeMatch]:
         groups = [
-            self.knowledge_base.search(query, limit=settings.voice_assistant_search_candidates)
+            knowledge_base.search(query, limit=settings.voice_assistant_search_candidates)
             for query in (*queries, question)
         ]
         return self._merge_matches(groups, limit=settings.voice_assistant_max_context_items)
@@ -1838,6 +1935,7 @@ class VoiceAssistantService:
         question: str,
         direct_matches: list[KnowledgeMatch],
         guided_matches: list[KnowledgeMatch],
+        knowledge_base: KnowledgeBaseService,
     ) -> bool:
         if not guided_matches:
             return False
@@ -1852,7 +1950,7 @@ class VoiceAssistantService:
         if guided_top.entry.id == direct_top.entry.id:
             return guided_score >= direct_score
 
-        guided_original_score = self.knowledge_base.score_entry_for_question(
+        guided_original_score = knowledge_base.score_entry_for_question(
             question,
             guided_top.entry,
         )

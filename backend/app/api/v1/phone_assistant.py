@@ -59,7 +59,7 @@ async def _answer_phone_question(
     transcribed_at = perf_counter()
 
     if len(question) >= 3:
-        assistant_response = await get_voice_assistant_service().answer(question, for_phone=True)
+        assistant_response = await get_voice_assistant_service().answer(question, for_phone=True, db=db)
     else:
         assistant_response = _unrecognized_question_response(question)
     answered_at = perf_counter()

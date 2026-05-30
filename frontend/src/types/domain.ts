@@ -8,6 +8,7 @@ export type TicketStatus =
   | "answered"
   | "closed";
 export type Priority = "low" | "medium" | "high";
+export type KnowledgeEntryStatus = "draft" | "published" | "archived";
 
 export interface User {
   id: string;
@@ -106,6 +107,28 @@ export interface Ticket {
 
 export interface OperatorTicketPage {
   items: Ticket[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface KnowledgeEntry {
+  id: string;
+  slug: string;
+  title: string;
+  question: string;
+  answer: string;
+  source_url: string;
+  tags: string[];
+  status: KnowledgeEntryStatus;
+  content_hash: string;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeEntryPage {
+  items: KnowledgeEntry[];
   total: number;
   limit: number;
   offset: number;
