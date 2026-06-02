@@ -25,6 +25,16 @@ class VoiceAssistantService:
         self.knowledge_base = KnowledgeBaseService()
 
     @staticmethod
+    def _get_llm(for_phone: bool) -> AssistantService:
+        public_api = _public_voice_assistant_module()
+        service = (
+            public_api.get_phone_qwen_assistant_service()
+            if for_phone
+            else public_api.get_base_qwen_assistant_service()
+        )
+        return cast(AssistantService, service)
+
+    @staticmethod
     def _direct_phone_fact_answer(question: str, entry: KnowledgeBaseEntry) -> str:
         intent = detect_direct_fact_intent(question)
         if intent is None:
@@ -95,12 +105,7 @@ class VoiceAssistantService:
 
         if llm_enabled and guided_retrieval_enabled:
             try:
-                public_api = _public_voice_assistant_module()
-                llm = (
-                    public_api.get_phone_qwen_assistant_service()
-                    if for_phone
-                    else public_api.get_base_qwen_assistant_service()
-                )
+                llm = self._get_llm(for_phone)
                 search_plan = llm.plan_search_queries(question)
                 guided_matches = self._search_with_guided_queries(
                     question,
@@ -175,13 +180,8 @@ class VoiceAssistantService:
 
         if llm_enabled and not llm_unavailable:
             try:
-                if llm is None:
-                    public_api = _public_voice_assistant_module()
-                    llm = (
-                        public_api.get_phone_qwen_assistant_service()
-                        if for_phone
-                        else public_api.get_base_qwen_assistant_service()
-                    )
+                assistant = llm or self._get_llm(for_phone)
+                llm = assistant
                 generation_kwargs: dict[str, Any] = {
                     "allow_related_sources": not reliable_match,
                 }
@@ -191,9 +191,9 @@ class VoiceAssistantService:
                             settings.voice_assistant_phone_max_new_tokens
                         )
                     generation_kwargs["for_phone"] = True
-                answer_text = llm.generate_answer(question, context_matches, **generation_kwargs)
+                answer_text = assistant.generate_answer(question, context_matches, **generation_kwargs)
                 used_llm = bool(answer_text)
-                model_name = llm.model_name if used_llm else None
+                model_name = assistant.model_name if used_llm else None
             except Exception:
                 logger.exception("Voice assistant LLM generation failed.")
                 if context_matches:

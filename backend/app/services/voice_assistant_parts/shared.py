@@ -30,7 +30,7 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 KNOWLEDGE_BASE_PATH = Path(__file__).resolve().parents[2] / "data" / "kpi_faq_knowledge_base.json"
-_DATABASE_KNOWLEDGE_BASE_CACHE: dict[str, "KnowledgeBaseService"] = {}
+_DATABASE_KNOWLEDGE_BASE_CACHE: dict[str, Any] = {}
 TOKEN_RE = re.compile(r"[0-9a-zа-щьюяґєії']{2,}", re.IGNORECASE)
 NON_TOKEN_RE = re.compile(r"[^0-9a-zа-щьюяґєії]+", re.IGNORECASE)
 STOP_WORDS = {

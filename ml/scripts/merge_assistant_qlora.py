@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import torch
 from peft import PeftModel
@@ -23,7 +24,7 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Loading base model on CPU: {args.base_model}", flush=True)
-    model = AutoModelForCausalLM.from_pretrained(
+    model: Any = AutoModelForCausalLM.from_pretrained(
         args.base_model,
         torch_dtype=dtype,
         device_map={"": "cpu"},
@@ -42,7 +43,7 @@ def main() -> None:
         safe_serialization=True,
         max_shard_size=args.max_shard_size,
     )
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
+    tokenizer: Any = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
     tokenizer.save_pretrained(args.output_dir)
     print("Merge complete.", flush=True)
 

@@ -56,7 +56,7 @@ def model_load_kwargs(config: dict[str, Any]) -> dict[str, Any]:
 
 def tokenize_and_pack(
     dataset: Dataset,
-    tokenizer: AutoTokenizer,
+    tokenizer: Any,
     *,
     block_size: int,
 ) -> Dataset:
@@ -177,7 +177,7 @@ def main() -> None:
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=default_data_collator,
     )
     trainer.train()
