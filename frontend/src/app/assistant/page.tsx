@@ -1,6 +1,6 @@
 "use client";
 
-import { Headphones, RotateCcw, TicketPlus } from "lucide-react";
+import { Headphones, RotateCcw, Send, TicketPlus } from "lucide-react";
 import Link from "next/link";
 import { useRef, useState } from "react";
 
@@ -208,6 +208,17 @@ function VoiceAssistantWorkspace() {
                 value={questionText}
               />
             </label>
+            <div className="toolbar">
+              <button
+                className="primary-button"
+                disabled={asking || creatingTicket || normalizedQuestion.length < 3}
+                onClick={() => void askAssistant(null, questionText)}
+                type="button"
+              >
+                <Send size={18} />
+                {asking ? "Обробка..." : "Запитати"}
+              </button>
+            </div>
 
             {asking && <LoadingState message="Довідкова служба формує відповідь..." />}
           </section>

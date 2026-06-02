@@ -35,6 +35,27 @@ function formatDuration(totalSeconds: number) {
   return `${minutes}:${seconds}`;
 }
 
+function callErrorMessage(error: unknown): string {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+      return "Доступ до мікрофона заборонено. Дозвольте мікрофон у браузері й спробуйте подзвонити ще раз.";
+    }
+    if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+      return "Мікрофон не знайдено. Підключіть мікрофон і спробуйте подзвонити ще раз.";
+    }
+    if (error.name === "NotReadableError") {
+      return "Мікрофон зайнятий іншою програмою. Закрийте її або звільніть мікрофон і спробуйте ще раз.";
+    }
+  }
+  if (error instanceof Error && error.message) {
+    if (error.message.toLowerCase().includes("permission denied")) {
+      return "Доступ до мікрофона заборонено. Дозвольте мікрофон у браузері й спробуйте подзвонити ще раз.";
+    }
+    return `Не вдалося виконати дзвінок: ${error.message}`;
+  }
+  return "Не вдалося виконати дзвінок.";
+}
+
 export function PbxCallButton() {
   const [callState, setCallState] = useState<CallState>("idle");
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
@@ -138,7 +159,7 @@ export function PbxCallButton() {
       setCallState("calling");
       await simpleUser.call(`sip:${PBX_ASSISTANT_NUMBER}@${PBX_SIP_DOMAIN}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не вдалося виконати дзвінок.");
+      setError(callErrorMessage(err));
       resetCallState();
       await cleanup();
     }
